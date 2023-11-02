@@ -271,7 +271,7 @@ def main(network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device=
 
     # Loop over batches.
     dist.print0(f'Generating {len(seeds)} images to "{outdir}"...')
-    for batch_seeds in tqdm.tqdm(rank_batches, unit='batch', disable=(dist.get_rank() != 0)):
+    for cur_batch, batch_seeds in enumerate(tqdm.tqdm(rank_batches, unit='batch', disable=(dist.get_rank() != 0))):
         torch.distributed.barrier()
         batch_size = len(batch_seeds)
         if batch_size == 0:
@@ -293,8 +293,23 @@ def main(network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device=
         sampler_fn = ablation_sampler if have_ablation_kwargs else edm_sampler
         images = sampler_fn(net, latents, class_labels, randn_like=rnd.randn_like, **sampler_kwargs)
 
-        # Save images.
+        # Save images in batches of 10000 in npz file format, similar to CIFAR-10
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
+
+        # *-----------------------ADDED CODE------------------------------*
+
+        # Ignores outdir and saves images to training_data in npz format
+        if class_labels is None:
+            np.savez_compressed('training_data/uncond_samples_batch' + str(cur_batch) + '.npz', images=images_np)
+        else:
+            np.savez_compressed('training_data/cond_samples_batch' + str(cur_batch) + '.npz', images=images_np,
+                                labels=class_labels.cpu().numpy())
+
+        # TODO: Add option to allow for both PNG and NPZ as save options
+
+        # *-----------------------END-------------------------------------*
+        # Save images.
+        """
         for seed, image_np in zip(batch_seeds, images_np):
             image_dir = os.path.join(outdir, f'{seed-seed%1000:06d}') if subdirs else outdir
             os.makedirs(image_dir, exist_ok=True)
@@ -303,11 +318,7 @@ def main(network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device=
                 PIL.Image.fromarray(image_np[:, :, 0], 'L').save(image_path)
             else:
                 PIL.Image.fromarray(image_np, 'RGB').save(image_path)
-
-        # TODO: Make it so that the program generates 50 000 images and saves them as a npz file
-
-
-
+        """
 
     # Done.
     torch.distributed.barrier()
