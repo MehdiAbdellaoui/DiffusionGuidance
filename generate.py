@@ -306,6 +306,9 @@ def main(network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device=
 
         # TODO: Make it so that the program generates 50 000 images and saves them as a npz file
 
+
+
+
     # Done.
     torch.distributed.barrier()
     dist.print0('Done.')
