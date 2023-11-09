@@ -3,6 +3,7 @@ from abc import abstractmethod
 import math
 
 import numpy as np
+import torch
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
@@ -704,10 +705,11 @@ class EncoderUNetModel(nn.Module):
         num_heads=1,
         num_head_channels=-1,
         num_heads_upsample=-1,
+        num_classes=None,
         use_scale_shift_norm=False,
         resblock_updown=False,
         use_new_attention_order=False,
-        pool="adaptive",
+        pool="adaptive"
     ):
         super().__init__()
 
@@ -734,6 +736,9 @@ class EncoderUNetModel(nn.Module):
             nn.SiLU(),
             linear(time_embed_dim, time_embed_dim),
         )
+        self.num_classes = num_classes
+        if self.num_classes is not None:
+            self.label_emb = nn.Embedding(num_classes, time_embed_dim)
 
         ch = int(channel_mult[0] * model_channels)
         self.input_blocks = nn.ModuleList(
@@ -868,15 +873,20 @@ class EncoderUNetModel(nn.Module):
         self.input_blocks.apply(convert_module_to_f32)
         self.middle_block.apply(convert_module_to_f32)
 
-    def forward(self, x, timesteps):
+    def forward(self, x, timesteps, labels):
         """
         Apply the model to an input batch.
 
         :param x: an [N x C x ...] Tensor of inputs.
         :param timesteps: a 1-D batch of timesteps.
+        :param labels: a [N x C] tensor of one-hot encodings
         :return: an [N x K] Tensor of outputs.
         """
+
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
+
+        if self.num_classes is not None:
+            emb = emb + self.label_emb(torch.argmax(labels, 1))
 
         results = []
         h = x.type(self.dtype)
