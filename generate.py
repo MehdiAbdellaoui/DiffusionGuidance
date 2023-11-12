@@ -23,6 +23,7 @@ from torch_utils import distributed as dist
 # Proposed EDM sampler (Algorithm 2).
 
 def edm_sampler(
+    discriminator, eta, w_DG_1, w_DG_2,
     net, latents, class_labels=None, randn_like=torch.randn_like,
     num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
     S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
@@ -37,27 +38,84 @@ def edm_sampler(
     t_steps = torch.cat([net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]) # t_N = 0
 
     # TODO: Add the discriminator to the score according to the paper
+    
+    # Boosting?
+    S_churn_manual = 4
+
+    # define vector of length equal to number of samples to be able to modify parameter values
+    # depending on density-ratio of specific sample (see page 22 of paper)
+    S_churn_vector_default = torch.tensor([S_churn] * latents.shape[0], device=latents.device)
+    S_churn_vector_max = torch.tensor([np.sqrt(2) - 1] * latents.shape[0], device=latents.device)
+    S_noise_vector = torch.tensor([S_noise] * latents.shape[0], device=latents.device)
+    
+    # set to large positive value by default
+    log_ratio = torch.tensor([np.finfo(np.float64).max] * latents.shape[0], device=latents.device)
 
     # Main sampling loop.
     x_next = latents.to(torch.float64) * t_steps[0]
     for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])): # 0, ..., N-1
         x_cur = x_next
+        
+        S_churn_vector = S_churn_vector_default.clone()
+
+        # for every odd denoising steps (page 22 of paper)
+        if i % 2 == 1:
+            # for such samples with density-ratio less than 0 (page 22 of paper)
+            S_churn_vector[log_ratio < 0.] = S_churn_manual
 
         # Increase noise temporarily.
-        gamma = min(S_churn / num_steps, np.sqrt(2) - 1) if S_min <= t_cur <= S_max else 0
-        t_hat = net.round_sigma(t_cur + gamma * t_cur)
-        x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * randn_like(x_cur)
+        # adapted due to vectorized version of S_churn
+        gamma = torch.minimum(S_churn_vector / num_steps, S_churn_vector_max) if S_min <= t_cur <= S_max else torch.zeros_like(S_churn_vector)
+        
+        # sigma(t) = t from EDM paper
+        t_hat = net.round_sigma(t_cur + gamma * t_cur) 
+        
+        # adapted due to vectorized version of t_hat and S_noise 
+        x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt().reshape(x_cur.shape) * S_noise_vector.reshape(x_cur.shape) * randn_like(x_cur)
 
         # Euler step.
         denoised = net(x_hat, t_hat, class_labels).to(torch.float64)
-        d_cur = (x_hat - denoised) / t_hat
-        x_next = x_hat + (t_next - t_hat) * d_cur
+        
+        # adapted due to vectorized version of t_hat
+        d_cur = (x_hat - denoised) / t_hat.reshape(x_hat.shape)
+        
+        # first order correction according to Heun solve (see page 21 of paper)
+        if w_DG_1 != 0.:
 
+            # TO BE COMPLETED: may depend on generator implementation
+            discriminator_output, log_ratio = discriminator.get_log_ratio(...)
+            
+            # for every odd denoising steps (page 22 of paper)
+            if i % 2 == 1:
+                # for such samples with density-ratio less than 0 (page 22 of paper)
+                # instead of setting w_DG_1 = 2 instead of w_DG_1 = 1 in this case
+                # we equivalently operate on the output of the discriminator
+                discriminator_output[log_ratio < 0.] *= 2 
+        
+            # adjust d_cur with discriminator output and divide to make it compatible with previous d_cur
+            d_cur += w_DG_1 * (discriminator_output / t_hat.reshape(x_hat.shape))
+
+        # adapted due to vectorized version of t_hat
+        x_next = x_hat + (t_next - t_hat).reshape(x_hat.shape) * d_cur
+        
         # Apply 2nd order correction.
-        if i < num_steps - 1:
+        if i < num_steps - 1: # otherwise t_next is not available
             denoised = net(x_next, t_next, class_labels).to(torch.float64)
+
+            # no need to adapt because t_next is not vectorized
             d_prime = (x_next - denoised) / t_next
-            x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
+            
+            # second order correction according to Heun solve (see page 21 of paper)
+            if w_DG_2 != 0.:
+                
+                # TO BE COMPLETED: may depend on generator implementation
+                discriminator_output, log_ratio = discriminator.get_log_ratio(...)
+            
+                # adjust d_prime with discriminator output and divide to make it compatible with previous d_cur
+                d_prime += w_DG_2 * (discriminator_output / t_next)
+
+            # adapted due to vectorized version of t_hat
+            x_next = x_hat + (t_next - t_hat).reshape(x_hat.shape) * (0.5 * d_cur + 0.5 * d_prime)
 
     return x_next
 
@@ -120,6 +178,15 @@ def parse_int_list(s):
 @click.option('--disc', 'discretization',  help='Ablate time step discretization {t_i}', metavar='vp|ve|iddpm|edm', type=click.Choice(['vp', 've', 'iddpm', 'edm']))
 @click.option('--schedule',                help='Ablate noise schedule sigma(t)', metavar='vp|ve|linear',           type=click.Choice(['vp', 've', 'linear']))
 @click.option('--scaling',                 help='Ablate signal scaling s(t)', metavar='vp|none',                    type=click.Choice(['vp', 'none']))
+
+#----------------------------------------------------------------------------
+# Discriminator Guidance
+#----------------------------------------------------------------------------
+
+# Default values come from Figure 21 of page 22
+@click.option('--w_DG_1',                     help='Weight for 1st order DG', metavar='FLOAT',                              type=click.FloatRange(min=0), default=2, show_default=True)
+@click.option('--w_DG_2',                     help='Weight for 2nd order DG', metavar='FLOAT',                              type=click.FloatRange(min=0), default=0, show_default=True)
+
 
 def main(network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device=torch.device('cuda'), **sampler_kwargs):
     """Generate random images using the techniques described in the paper
