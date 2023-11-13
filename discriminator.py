@@ -68,7 +68,7 @@ class WVEtoLVP:
         anti_t_min = self.antiderivative(t_min)
         Z = self.antiderivative(self.T) - anti_t_min
         u = torch.rand(n_samples, device=device) * Z + anti_t_min
-        return self.transform_to_tau(u)
+        return self.transform_to_tau(torch.exp(u))
 
 
 if __name__ == '__main__':
