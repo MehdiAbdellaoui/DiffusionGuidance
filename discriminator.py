@@ -37,6 +37,40 @@ def get_discriminator_model(conditioned):
     return discriminator
 
 
+# Implemented based on page 24 and 15
+class WVEtoLVP:
+    """Class to convert between the training modes of EDM and ADM"""
+    def __init__(self):
+        self.beta_min = 0.1
+        self.beta_max = 20.
+        self.T = 1.     # For u sampled uniformly from [0, T]
+
+    def transform_to_tau(self, var_wve_t):
+        temp = self.beta_max ** 2 + 2 * (self.beta_max - self.beta_min) * torch.log(1. + var_wve_t)
+        tau = -self.beta_min + torch.sqrt(temp) / (self.beta_max - self.beta_min)
+        return tau
+
+    def get_mean_and_std(self, std_wve_t):
+        tau = self.transform_to_tau(std_wve_t ** 2)
+        mean_coef = -tau ** 2 * (self.beta_max - self.beta_min) / 4 - tau * self.beta_min / 2
+        mean = torch.exp(mean_coef)
+        return mean, tau
+
+    def antiderivative(self, t):
+        if isinstance(t, float) or isinstance(t, int):
+            t = torch.tensor(t).float()
+        integral_beta = 0.5 * t ** 2 * (self.beta_max - self.beta_min) + t * self.beta_min
+        return torch.log(1. - torch.exp(- integral_beta)) + integral_beta
+
+    def generate_diffusion_times(self, n_samples, device, t_min=1e-5):
+        # See page 15 for derivations of importance sampler!
+        # Calculate F(t) = u * Z - F(t_min), where F(t) is the antiderivative of the importance weight
+        anti_t_min = self.antiderivative(t_min)
+        Z = self.antiderivative(self.T) - anti_t_min
+        u = torch.rand(n_samples, device=device) * Z + anti_t_min
+        return self.transform_to_tau(u)
+
+
 if __name__ == '__main__':
     get_ADM_model()
     get_discriminator_model(True)

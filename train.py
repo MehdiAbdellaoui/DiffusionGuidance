@@ -3,7 +3,7 @@ import numpy as np
 import click
 import torch.utils.data as data
 import torchvision.transforms as transforms
-from discriminator import get_discriminator_model, get_ADM_model
+from discriminator import get_discriminator_model, get_ADM_model, WVEtoLVP
 from keras.datasets import cifar10
 import dnnlib
 
@@ -107,7 +107,9 @@ def main(**kwargs):
             label = label.to(device)
 
             # TODO: Implement Loss calculations here!
-
+            importance_sampling = WVEtoLVP()
+            # We can do uniform sampling as well, see page 24 and 15 it took me a while to understand
+            # approximately what's going on in the derivations.
 
 if __name__ == "__main__":
     main()

@@ -83,6 +83,7 @@ def edm_sampler(
         if w_DG_1 != 0.:
 
             # TO BE COMPLETED: may depend on generator implementation
+            # See the WVEtoLVP class in discriminator.py, it will be needed
             discriminator_output, log_ratio = discriminator.get_log_ratio(...)
             
             # for every odd denoising steps (page 22 of paper)
