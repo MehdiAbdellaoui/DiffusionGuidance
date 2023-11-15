@@ -873,13 +873,13 @@ class EncoderUNetModel(nn.Module):
         self.input_blocks.apply(convert_module_to_f32)
         self.middle_block.apply(convert_module_to_f32)
 
-    def forward(self, x, timesteps, labels):
+    def forward(self, x, timesteps, labels, features=True, sigmoid=False):
         """
         Apply the model to an input batch.
 
         :param x: an [N x C x ...] Tensor of inputs.
         :param timesteps: a 1-D batch of timesteps.
-        :param labels: a [N x C] tensor of one-hot encodings
+        :param labels: a [N x ...] tensor of one-hot encodings
         :return: an [N x K] Tensor of outputs.
         """
 
@@ -901,4 +901,8 @@ class EncoderUNetModel(nn.Module):
             return self.out(h)
         else:
             h = h.type(x.dtype)
+            if features:
+                return h
+            if sigmoid:
+                return F.sigmoid(self.out(h))
             return self.out(h)

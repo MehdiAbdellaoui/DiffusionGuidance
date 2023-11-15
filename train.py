@@ -7,37 +7,6 @@ from discriminator import get_discriminator_model, get_ADM_model, WVEtoLVP
 from keras.datasets import cifar10
 import dnnlib
 
-# TODO: Create training run according to the paper
-
-
-def BCE_loss_fun(temporal_weight=None):
-    """
-
-    Args:
-        temporal_weight: Function that takes t as input as returns the corresponding weight
-
-    Returns: Weighted BCE loss function
-
-    """
-    def loss_fun(pred, labels, t=None):
-        """
-
-        Args:
-            pred: B vector of model predictions
-            labels: B vector of true labels
-            t: B vector of diffusion times used to calculate the weight
-
-        Returns: The BCE loss weighted with the temporal weight
-
-        """
-        if temporal_weight is None or t is None:
-            loss = (torch.matmul(labels, torch.log(pred)) + torch.matmul(1 - labels, torch.log(1 - pred)))
-        else:
-            loss = torch.mul(temporal_weight(t), (torch.matmul(labels, torch.log(pred)) +
-                                                  torch.matmul(1 - labels, torch.log(1 - pred))))
-        return -torch.mean(loss)
-    return loss_fun
-
 
 class CustomDataset(data.Dataset):
     def __init__(self, data, labels, cond=None):
@@ -56,8 +25,8 @@ class CustomDataset(data.Dataset):
 
 
 @click.command()
-@click.option('--sample_dir',                  help='Save directory',         metavar='PATH',    type=str, required=True,     default="training_data/conditional_edm_samples/edm_cond_samples.npz")
-@click.option('--cond',                        help='Is it conditional?',     metavar='BOOL',    type=click.IntRange(min=0),  default=0)
+@click.option('--sample_dir',                  help='Sample directory',       metavar='PATH',    type=str, required=True,     default="training_data/conditional_edm_samples/edm_cond_samples.npz")
+@click.option('--cond',                        help='Is it conditional?',     metavar='BOOL',    type=click.IntRange(min=0),  default=1)
 @click.option('--batch_size',                  help='Batch size',             metavar='INT',     type=click.IntRange(min=1),  default=128)
 @click.option('--n_epochs',                    help='Num epochs',             metavar='INT',     type=click.IntRange(min=1),  default=50)
 @click.option('--lr',                          help='Learning rate',          metavar='FLOAT',   type=click.FloatRange(min=0),default=3e-4)
@@ -71,7 +40,7 @@ def main(**kwargs):
     true_data = torch.from_numpy(true_data)
 
     fake_data = torch.from_numpy(np.load(opts.sample_dir)['images'])
-    training_data = torch.concatenate((true_data, fake_data))
+    training_data = torch.concatenate((true_data, fake_data)).permute(0, 3, 1, 2)
     training_lbl = torch.concatenate((torch.ones(true_data.shape[0]), torch.zeros(fake_data.shape[0])))
 
     # If conditioned on class, load those aswell
@@ -84,32 +53,60 @@ def main(**kwargs):
     else:
         dataset = CustomDataset(training_data, training_lbl)
 
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # Set up training and custom loss function.
-    loss_fun = BCE_loss_fun()
-    adm_classifier = get_ADM_model()
-    discriminator = get_discriminator_model(opts.cond)
+    loss_fun = torch.nn.BCELoss()
+    scaler = lambda x: 2. * x - 1
+    adm_feature_extraction = get_ADM_model().to(device)
+    discriminator = get_discriminator_model(opts.cond).to(device)
     optimizer = torch.optim.Adam(discriminator.parameters(), lr=opts.lr, weight_decay=opts.wd)
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=opts.batch_size, shuffle=True)
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    importance_sampling = WVEtoLVP()
+
     for i in range(opts.n_epochs):
+        batch_loss = []
+        batch_accuracy = []
         for samples in data_loader:
             # Reset grads
             optimizer.zero_grad()
 
             # Load samples into device memory
             if opts.cond:
-                image, label, cond = samples
+                image, labels, cond = samples
                 cond = cond.to(device)
             else:
-                image, label = samples
-            image = image.to(device)
-            label = label.to(device)
+                cond = None
+                image, labels = samples
+            image = image.to(device).float()
+            image = scaler(image)
+            labels = labels.to(device)
+            n_samples = labels.shape[0]
 
             # TODO: Implement Loss calculations here!
-            importance_sampling = WVEtoLVP()
-            # We can do uniform sampling as well, see page 24 and 15 it took me a while to understand
-            # approximately what's going on in the derivations.
+            # We can do uniform sampling as well, see page 24 and 15 for importance sampling
+            # Get times via importance sampling
+            t = importance_sampling.generate_diffusion_times(n_samples, device)
+            mean, std = importance_sampling.marginal_prob(t)
+
+            # Generate noise
+            e = torch.randn_like(image)
+            # Apply noise by expanding the mean and std values to fit with the image and noise
+            noisy_images = mean[:, None, None, None] * image + std[:, None, None, None] * e
+
+            with torch.no_grad():
+                features = adm_feature_extraction(noisy_images, t, cond, features=True, sigmoid=False)
+            discriminator_output = discriminator(features, t, cond, features=False, sigmoid=True)[:, 0]
+
+            loss = loss_fun(discriminator_output, labels)
+            loss.backward()
+            optimizer.step()
+            accuracy = ((discriminator_output >= 0.5).float() == labels).float().mean()
+
+            batch_loss.append(loss.item())
+            batch_accuracy.append(accuracy.item())
+            print(f'Epoch {i}: Loss: {np.mean(batch_loss)}, Accuracy: {np.mean(batch_accuracy)}')
+        torch.save(discriminator.state_dict(), f"models/discriminator_epoch{i}.pt")
 
 
 if __name__ == "__main__":

@@ -50,10 +50,15 @@ class WVEtoLVP:
         tau = -self.beta_min + torch.sqrt(temp) / (self.beta_max - self.beta_min)
         return tau
 
-    def get_mean_and_std(self, std_wve_t):
-        tau = self.transform_to_tau(std_wve_t ** 2)
-        mean_coef = -tau ** 2 * (self.beta_max - self.beta_min) / 4 - tau * self.beta_min / 2
+    def marginal_prob(self, t):
+        mean_coef = -t ** 2 * (self.beta_max - self.beta_min) / 4 - t * self.beta_min / 2
         mean = torch.exp(mean_coef)
+        std = torch.sqrt(1. - torch.exp(2. * mean_coef))
+        return mean, std
+
+    def transform_WVE_to_LVP(self, std_wve_t):
+        tau = self.transform_to_tau(std_wve_t ** 2)
+        mean, _ = self.marginal_prob(tau)
         return mean, tau
 
     def antiderivative(self, t):

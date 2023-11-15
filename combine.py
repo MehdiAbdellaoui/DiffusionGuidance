@@ -11,12 +11,12 @@ def combine_npz(file_names, num_batches, save_name, conditional):
     for i, files in enumerate(file_names):
         file = np.load(files)
         if images is None or labels is None:
-            images = file['data']
+            images = file['images']
             labels = 0
             if conditional:
                 labels = file['labels']
         else:
-            images = np.concatenate((images, file['data']))
+            images = np.concatenate((images, file['images']))
             if conditional:
                 labels = np.concatenate((labels, file['labels']))
 
@@ -31,7 +31,7 @@ def combine_npz(file_names, num_batches, save_name, conditional):
 
 
 if __name__ == '__main__':
-    combine = True
+    combine = False
     if combine is True:
         # Combine into 5 batches with 10000 images and labels in each batch
         num_files = 5
@@ -40,9 +40,13 @@ if __name__ == '__main__':
         combine_npz(file_names, 1, save_name, True)
     else:
         # Check such that the combined batches are not duplicates
-        file = np.load('training_data/edm_uncond_samples0.npz')
+        file = np.load('training_data/conditional_edm_samples/edm_cond_samples.npz')
         print(file['images'].shape)
         plt.imshow(file['images'][0])
         plt.show()
         plt.imshow(file['images'][250])
+        plt.show()
+        plt.imshow(file['images'][751])
+        plt.show()
+        plt.imshow(file['images'][1000])
         plt.show()
