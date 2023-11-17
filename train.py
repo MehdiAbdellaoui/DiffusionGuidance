@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import click
 import torch.utils.data as data
+import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 from discriminator import get_discriminator_model, get_ADM_model, WVEtoLVP
 from keras.datasets import cifar10
@@ -64,10 +65,13 @@ def main(**kwargs):
 
     importance_sampling = WVEtoLVP()
 
+    plot_accuracy = []
+    plot_loss = []
+    plot_epochs = []
     for i in range(opts.n_epochs):
         batch_loss = []
         batch_accuracy = []
-        for samples in data_loader:
+        for j, samples in enumerate(data_loader):
             # Reset grads
             optimizer.zero_grad()
 
@@ -83,7 +87,6 @@ def main(**kwargs):
             labels = labels.to(device)
             n_samples = labels.shape[0]
 
-            # TODO: Implement Loss calculations here!
             # We can do uniform sampling as well, see page 24 and 15 for importance sampling
             # Get times via importance sampling
             t = importance_sampling.generate_diffusion_times(n_samples, device)
@@ -105,8 +108,30 @@ def main(**kwargs):
 
             batch_loss.append(loss.item())
             batch_accuracy.append(accuracy.item())
-            print(f'Epoch {i}: Loss: {np.mean(batch_loss)}, Accuracy: {np.mean(batch_accuracy)}')
+            # Print every 20 batches
+            if j % 20 == 0:
+                print(f'Epoch {i}: Loss: {np.mean(batch_loss)}, Accuracy: {np.mean(batch_accuracy)}')
+        # Save every epoch if anything happens
         torch.save(discriminator.state_dict(), f"models/discriminator_epoch{i}.pt")
+
+        # For plotting the training
+        plot_loss.append(np.mean(batch_loss))
+        plot_accuracy.append(np.mean(batch_accuracy))
+        plot_epochs.append(i)
+
+    # Plotting training stats
+    plt.plot(plot_epochs, plot_loss, label='Training data')
+    plt.title('Discriminator training loss per epoch')
+    plt.xlabel('Number of Epochs')
+    plt.ylabel('Mean Loss (BCE)')
+    plt.legend()
+    plt.show()
+    plt.plot(plot_epochs, plot_accuracy, label='Training data')
+    plt.title('Discriminator training accuracy per epoch')
+    plt.xlabel('Number of Epochs')
+    plt.ylabel('Mean Accuracy')
+    plt.legend()
+    plt.show()
 
 
 if __name__ == "__main__":

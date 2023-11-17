@@ -46,8 +46,8 @@ class WVEtoLVP:
         self.T = 1.     # For u sampled uniformly from [0, T]
 
     def transform_to_tau(self, var_wve_t):
-        temp = self.beta_max ** 2 + 2 * (self.beta_max - self.beta_min) * torch.log(1. + var_wve_t)
-        tau = -self.beta_min + torch.sqrt(temp) / (self.beta_max - self.beta_min)
+        temp = self.beta_min ** 2 + 2. * (self.beta_max - self.beta_min) * torch.log(1. + var_wve_t)
+        tau = (-self.beta_min + torch.sqrt(temp)) / (self.beta_max - self.beta_min)
         return tau
 
     def marginal_prob(self, t):
