@@ -19,11 +19,14 @@ import PIL.Image
 import dnnlib
 from torch_utils import distributed as dist
 
+import random
+import math
+
 #----------------------------------------------------------------------------
-# Proposed EDM sampler (Algorithm 2).
+# Proposed EDM-G++ sampler 
 
 def edm_sampler(
-    discriminator, eta, w_DG_1, w_DG_2,
+    discriminator, w_DG_1, w_DG_2,
     net, latents, class_labels=None, randn_like=torch.randn_like,
     num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
     S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
@@ -37,10 +40,10 @@ def edm_sampler(
     t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
     t_steps = torch.cat([net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]) # t_N = 0
 
-    # TODO: Add the discriminator to the score according to the paper
-    
-    # Boosting?
+    # MISSING: S_noise_manual and boosting, needed?
     S_churn_manual = 4
+    period_weight = 2 # for every odd denoising steps (page 22 of paper)
+    period_churn = 5 # why 5? for every odd denoising steps (page 22 of paper)
 
     # define vector of length equal to number of samples to be able to modify parameter values
     # depending on density-ratio of specific sample (see page 22 of paper)
@@ -59,7 +62,7 @@ def edm_sampler(
         S_churn_vector = S_churn_vector_default.clone()
 
         # for every odd denoising steps (page 22 of paper)
-        if i % 2 == 1:
+        if i % period_churn == 0: # consider start at step 1, not 0?
             # for such samples with density-ratio less than 0 (page 22 of paper)
             S_churn_vector[log_ratio < 0.] = S_churn_manual
 
@@ -82,12 +85,12 @@ def edm_sampler(
         # first order correction according to Heun solve (see page 21 of paper)
         if w_DG_1 != 0.:
 
-            # TO BE COMPLETED: may depend on generator implementation
+            # TO BE COMPLETED: may depend on discriminator implementation
             # See the WVEtoLVP class in discriminator.py, it will be needed
             discriminator_output, log_ratio = discriminator.get_log_ratio(...)
             
             # for every odd denoising steps (page 22 of paper)
-            if i % 2 == 1:
+            if i % period_weight == 0:
                 # for such samples with density-ratio less than 0 (page 22 of paper)
                 # instead of setting w_DG_1 = 2 instead of w_DG_1 = 1 in this case
                 # we equivalently operate on the output of the discriminator
@@ -109,7 +112,7 @@ def edm_sampler(
             # second order correction according to Heun solve (see page 21 of paper)
             if w_DG_2 != 0.:
                 
-                # TO BE COMPLETED: may depend on generator implementation
+                # TO BE COMPLETED: may depend on discriminator implementation
                 discriminator_output, log_ratio = discriminator.get_log_ratio(...)
             
                 # adjust d_prime with discriminator output and divide to make it compatible with previous d_cur
@@ -121,48 +124,12 @@ def edm_sampler(
     return x_next
 
 #----------------------------------------------------------------------------
-# Wrapper for torch.Generator that allows specifying a different random seed
-# for each sample in a minibatch.
-
-class StackedRandomGenerator:
-    def __init__(self, device, seeds):
-        super().__init__()
-        self.generators = [torch.Generator(device).manual_seed(int(seed) % (1 << 32)) for seed in seeds]
-
-    def randn(self, size, **kwargs):
-        assert size[0] == len(self.generators)
-        return torch.stack([torch.randn(size[1:], generator=gen, **kwargs) for gen in self.generators])
-
-    def randn_like(self, input):
-        return self.randn(input.shape, dtype=input.dtype, layout=input.layout, device=input.device)
-
-    def randint(self, *args, size, **kwargs):
-        assert size[0] == len(self.generators)
-        return torch.stack([torch.randint(*args, size=size[1:], generator=gen, **kwargs) for gen in self.generators])
-
-#----------------------------------------------------------------------------
-# Parse a comma separated list of numbers or ranges and return a list of ints.
-# Example: '1,2,5-10' returns [1, 2, 5, 6, 7, 8, 9, 10]
-
-def parse_int_list(s):
-    if isinstance(s, list): return s
-    ranges = []
-    range_re = re.compile(r'^(\d+)-(\d+)$')
-    for p in s.split(','):
-        m = range_re.match(p)
-        if m:
-            ranges.extend(range(int(m.group(1)), int(m.group(2))+1))
-        else:
-            ranges.append(int(p))
-    return ranges
-
-#----------------------------------------------------------------------------
 
 @click.command()
 @click.option('--network', 'network_pkl',  help='Network pickle filename', metavar='PATH|URL',                      type=str, required=True)
 @click.option('--outdir',                  help='Where to save the output images', metavar='DIR',                   type=str, required=True)
-@click.option('--seeds',                   help='Random seeds (e.g. 1,2,5-10)', metavar='LIST',                     type=parse_int_list, default='0-63', show_default=True)
-@click.option('--subdirs',                 help='Create subdirectory for every 1000 seeds',                         is_flag=True)
+#@click.option('--seeds',                   help='Random seeds (e.g. 1,2,5-10)', metavar='LIST',                     type=parse_int_list, default='0-63', show_default=True)
+#@click.option('--subdirs',                 help='Create subdirectory for every 1000 seeds',                         is_flag=True)
 @click.option('--class', 'class_idx',      help='Class label  [default: random]', metavar='INT',                    type=click.IntRange(min=0), default=None)
 @click.option('--batch', 'max_batch_size', help='Maximum batch size', metavar='INT',                                type=click.IntRange(min=1), default=64, show_default=True)
 
@@ -184,12 +151,24 @@ def parse_int_list(s):
 # Discriminator Guidance
 #----------------------------------------------------------------------------
 
+# Configuration
 # Default values come from Figure 21 of page 22
 @click.option('--w_DG_1',                     help='Weight for 1st order DG', metavar='FLOAT',                              type=click.FloatRange(min=0), default=2, show_default=True)
 @click.option('--w_DG_2',                     help='Weight for 2nd order DG', metavar='FLOAT',                              type=click.FloatRange(min=0), default=0, show_default=True)
 
+# Discriminator checkpoint and architecture
+@click.option('--discriminator_checkpoint',   help='Path to discriminator checkpoint', metavar='STR',                       type=str, default='', show_default=True)
+@click.option('--conditional',   help='Conditional discriminator?', is_flag=True)
 
-def main(network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device=torch.device('cuda'), **sampler_kwargs):
+# Sampling configuration
+@click.option('--seed', help='Seed value', metavar='INT',                                type=click.IntRange(min=0), default=0, show_default=True)
+@click.option('--num_samples', help='Number of samples to generates', metavar='INT',                                type=click.IntRange(min=1), default=50000, show_default=True)
+@click.option('--save_format',   help='Format for storing the generated samples', metavar='png|npz',                       type=click.Choice(['png', 'npz']), default='npz', show_default=True)
+@click.option('--device',   help='Device', metavar='STR',                       type=str, default='cuda:0', show_default=True)
+
+
+def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_samples, save_format,
+    network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device, **sampler_kwargs):
     """Generate random images using the techniques described in the paper
     "Elucidating the Design Space of Diffusion-Based Generative Models".
 
@@ -205,76 +184,75 @@ def main(network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device=
     torchrun --standalone --nproc_per_node=2 generate.py --outdir=out --seeds=0-999 --batch=64 \\
         --network=https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-cond-vp.pkl
     """
-    dist.init()
-    num_batches = ((len(seeds) - 1) // (max_batch_size * dist.get_world_size()) + 1) * dist.get_world_size()
-    all_batches = torch.as_tensor(seeds).tensor_split(num_batches)
-    rank_batches = all_batches[dist.get_rank() :: dist.get_world_size()]
+    
+    # Set manual seed for reproducibility
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    
+    # Set device
+    device = torch.device(device)
 
-    # Rank 0 goes first.
-    if dist.get_rank() != 0:
-        torch.distributed.barrier()
-
-    # Load network.
-    dist.print0(f'Loading network from "{network_pkl}"...')
-    with dnnlib.util.open_url(network_pkl, verbose=(dist.get_rank() == 0)) as f:
+    # Load pretained score network.
+    print(f'Loading network from "{network_pkl}"...')
+    with open(network_pkl, 'rb') as f:
         net = pickle.load(f)['ema'].to(device)
-
-    # Other ranks follow.
-    if dist.get_rank() == 0:
-        torch.distributed.barrier()
+    
+    # Load pretained discriminator network.
+    if w_DG_1 != 0 or w_DG_2 != 0:
+        print(f'Loading discriminator from "{discriminator_checkpoint}"...')
+        discriminator = get_discriminator(discriminator_checkpoint) # TO BE COMPLETED
+    else:
+        discriminator = None
+    
+    # Variance Preserving SDE (VPSDE) introduced in "Score-based generative modeling through stochastic differential equations"
+    # Page 25: while score training is beneficial with WVE-SDE, discriminator training best fits with LVP-SDE. We, therefore, train the discriminator with LVP-SDE as default    
+    # TO BE COMPLETED
+    vpsde = get_vpsde() 
 
     # Loop over batches.
-    dist.print0(f'Generating {len(seeds)} images to "{outdir}"...')
-    for cur_batch, batch_seeds in enumerate(tqdm.tqdm(rank_batches, unit='batch', disable=(dist.get_rank() != 0))):
-        torch.distributed.barrier()
-        batch_size = len(batch_seeds)
-        if batch_size == 0:
-            continue
+    num_batches = math.ceil(num_samples / batch_size)
+    
+    print(f'Generating {num_samples} images to "{outdir}"...')
+    
+    for i in tqdm.tqdm(range(num_batches)):
 
         # Pick latents and labels.
-        rnd = StackedRandomGenerator(device, batch_seeds)
         latents = rnd.randn([batch_size, net.img_channels, net.img_resolution, net.img_resolution], device=device)
+        
         class_labels = None
+        
         if net.label_dim:
             class_labels = torch.eye(net.label_dim, device=device)[rnd.randint(net.label_dim, size=[batch_size], device=device)]
+        
         if class_idx is not None:
             class_labels[:, :] = 0
             class_labels[:, class_idx] = 1
 
         # Generate images.
         sampler_kwargs = {key: value for key, value in sampler_kwargs.items() if value is not None}
-        images = edm_sampler(net, latents, class_labels, randn_like=rnd.randn_like, **sampler_kwargs)
+        # TO BE COMPLETED
+        images = edm_sampler(discriminator, w_DG_1, w_DG_2, net, latents, class_labels, randn_like=rnd.randn_like, **sampler_kwargs)
 
-        # Save images in batches of 10000 in npz file format, similar to CIFAR-10
+        # Save images.
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
 
-        # *-----------------------ADDED CODE------------------------------*
-
-        # Ignores outdir and saves images to training_data in npz format
-        if class_labels is None:
-            np.savez_compressed('training_data/uncond_samples_batch' + str(cur_batch) + '.npz', images=images_np)
-        else:
-            np.savez_compressed('training_data/cond_samples_batch' + str(cur_batch) + '.npz', images=images_np,
-                                labels=class_labels.cpu().numpy())
-
-        # TODO: Add option to allow for both PNG and NPZ as save options
-
-        # *-----------------------END-------------------------------------*
-        # Save images.
-        """
-        for seed, image_np in zip(batch_seeds, images_np):
-            image_dir = os.path.join(outdir, f'{seed-seed%1000:06d}') if subdirs else outdir
-            os.makedirs(image_dir, exist_ok=True)
-            image_path = os.path.join(image_dir, f'{seed:06d}.png')
-            if image_np.shape[2] == 1:
-                PIL.Image.fromarray(image_np[:, :, 0], 'L').save(image_path)
-            else:
+        if save_format == 'png':
+            for idx, image_np in enumerate(images_np):
+                index = i * batch_size + idx
+                image_path = os.path.join(outdir, f'{index:06d}.png')
                 PIL.Image.fromarray(image_np, 'RGB').save(image_path)
-        """
-
-    # Done.
-    torch.distributed.barrier()
-    dist.print0('Done.')
+        elif save_format == 'npz':
+            if class_labels is None:
+                image_path = os.path.join(outdir, f'unconditional_{i:06d}.npz')
+                #np.savez_compressed('training_data/uncond_samples_batch' + str(cur_batch) + '.npz', images=images_np)
+            else:
+                image_path = os.path.join(outdir, f'conditional_{i:06d}.npz')
+                #np.savez_compressed('training_data/cond_samples_batch' + str(cur_batch) + '.npz', images=images_np,
+                #                    labels=class_labels.cpu().numpy())
+            
+            np.savez_compressed(image_path, images=images_np)
 
 #----------------------------------------------------------------------------
 
