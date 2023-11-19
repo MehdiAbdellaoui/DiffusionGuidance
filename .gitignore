@@ -9,6 +9,10 @@ __pycache__/
 # .idea files
 .idea/*
 
+# models
+*.pt
+*.npz
+
 # Distribution / packaging
 .Python
 build/
