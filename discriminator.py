@@ -67,6 +67,45 @@ def get_discriminator_model(conditioned, ckpt=None):
         discriminator.load_state_dict(pretrained_discriminator)
     return discriminator
 
+def get_gradient_density_ratio(discriminator, vpsde, input_, std_wve_t, time_mid, time_max, img_size, class_labels)
+    
+    # merging two checkpoints from different diffusion strategies (page 23)
+    mean_tau, tau = vpsde.transform_WVE_to_LVP(std_wve_t)
+
+    # outside range of application of DG
+    if tau.min() > time_max or tau.min() < time_mid or discriminator == None:
+        return torch.zeros_like(input_), torch.ones(input_.shape[0], device=input_.device) * 1e9  
+   
+    input_ = mean_tau.reshape(input_.shape) * input_
+
+    with torch.enable_grad():
+        # add gradient to input 
+        x_ = torch.tensor(input_, dtype=torch.float64, requires_grad=True)
+        
+        # classifier checkpoints are trained with Linear VP for 32x32 and Cosine VP for 64x64 (page 23)
+        if img_size == 64:
+            tau = vpsde.get_cosine_time_from_linear_time(tau)
+
+        tau = torch.ones(input_.shape[0], device=tau.device) * tau 
+        
+        density_log_ratio = get_density_log_ratio(discriminator, x_, tau, class_labels)
+
+        discriminator_score = torch.autograd.grad(outputs=density_log_ratio.sum(), inputs=x_, retain_graph=False)[0]
+    
+        discriminator_score *= - ((std_wve_t.reshape(discriminator_score.shape) ** 2) * mean_tau.reshape(discriminator_score.shape))
+        
+        return discriminator_score, density_log_ratio
+
+def get_density_log_ratio(discriminator, x_, tau, class_labels):
+    
+    logits = discriminator(x_, tau, class_labels)
+
+    # clip range for sampling according to Table 8 (paper 21)
+    prediction = torch.clip(logits, 1e-5, 1. - 1e-5)  
+
+    density_log_ratio = torch.log(prediction / (1. - prediction))
+    
+    return density_log_ratio
 
 # Implemented based on page 24 and 15
 class WVEtoLVP:
@@ -106,7 +145,18 @@ class WVEtoLVP:
         Z = self.antiderivative(self.T) - anti_t_min
         u = torch.rand(n_samples, device=device) * Z + anti_t_min
         return self.transform_to_tau(torch.exp(u))
-
+    
+    def get_cosine_time_from_linear_time(self, linear_time):
+        
+        # Cosine schedule from "Improved Denoising Diffusion Probabilistic Models": https://github.com/openai/improved-diffusion/blob/783b6740edb79fdb7d063250db2c51cc9545dcd1/improved_diffusion/gaussian_diffusion.py#L39
+        s = 0.008
+        cosine_schedule = lambda t: math.cos((t + s) / (1 + s) * math.pi / 2) ** 2
+        
+        sqrt_alpha_t_bar = torch.exp(-0.25 * linear_time ** 2 * (self.beta_1 - self.beta_0) - 0.5 * linear_time * self.beta_0)
+        time = torch.arccos(np.sqrt(cosine_schedule(0)) * sqrt_alpha_t_bar)
+        cosine_time = self.T * ((1. + s) * 2. / np.pi * time - s)
+        
+        return cosine_time
 
 if __name__ == '__main__':
     get_ADM_model()

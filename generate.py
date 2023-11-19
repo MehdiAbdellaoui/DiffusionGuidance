@@ -26,7 +26,7 @@ import math
 # Proposed EDM-G++ sampler 
 
 def edm_sampler(
-    discriminator, w_DG_1, w_DG_2,
+    discriminator, w_DG_1, w_DG_2, time_mid, time_max, adaptive_weight, vpsde,
     net, latents, class_labels=None, randn_like=torch.randn_like,
     num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
     S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
@@ -40,10 +40,9 @@ def edm_sampler(
     t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
     t_steps = torch.cat([net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]) # t_N = 0
 
-    # MISSING: S_noise_manual and boosting, needed?
     S_churn_manual = 4
     period_weight = 2 # for every odd denoising steps (page 22 of paper)
-    period_churn = 5 # why 5? for every odd denoising steps (page 22 of paper)
+    period_churn = 2 # 5 in their implementation? for every odd denoising steps (page 22 of paper)
 
     # define vector of length equal to number of samples to be able to modify parameter values
     # depending on density-ratio of specific sample (see page 22 of paper)
@@ -60,11 +59,12 @@ def edm_sampler(
         x_cur = x_next
         
         S_churn_vector = S_churn_vector_default.clone()
-
-        # for every odd denoising steps (page 22 of paper)
-        if i % period_churn == 0: # consider start at step 1, not 0?
-            # for such samples with density-ratio less than 0 (page 22 of paper)
-            S_churn_vector[log_ratio < 0.] = S_churn_manual
+         
+        if adaptive_weight:
+            # for every odd denoising steps (page 22 of paper)
+            if i % period_churn == 0: # consider start at step 1
+                # for such samples with density-ratio less than 0 (page 22 of paper)
+                S_churn_vector[log_ratio < 0.] = S_churn_manual
 
         # Increase noise temporarily.
         # adapted due to vectorized version of S_churn
@@ -85,16 +85,15 @@ def edm_sampler(
         # first order correction according to Heun solve (see page 21 of paper)
         if w_DG_1 != 0.:
 
-            # TO BE COMPLETED: may depend on discriminator implementation
-            # See the WVEtoLVP class in discriminator.py, it will be needed
-            discriminator_output, log_ratio = discriminator.get_log_ratio(...)
+            discriminator_output, log_ratio = discriminator.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, img_size, class_labels)
             
-            # for every odd denoising steps (page 22 of paper)
-            if i % period_weight == 0:
-                # for such samples with density-ratio less than 0 (page 22 of paper)
-                # instead of setting w_DG_1 = 2 instead of w_DG_1 = 1 in this case
-                # we equivalently operate on the output of the discriminator
-                discriminator_output[log_ratio < 0.] *= 2 
+            if adaptive_weight:
+                # for every odd denoising steps (page 22 of paper)
+                if i % period_weight == 0:
+                    # for such samples with density-ratio less than 0 (page 22 of paper)
+                    # instead of setting w_DG_1 = 2 instead of w_DG_1 = 1 in this case
+                    # we equivalently operate on the output of the discriminator
+                    discriminator_output[log_ratio < 0.] *= 2 
         
             # adjust d_cur with discriminator output and divide to make it compatible with previous d_cur
             d_cur += w_DG_1 * (discriminator_output / t_hat.reshape(x_hat.shape))
@@ -112,8 +111,7 @@ def edm_sampler(
             # second order correction according to Heun solve (see page 21 of paper)
             if w_DG_2 != 0.:
                 
-                # TO BE COMPLETED: may depend on discriminator implementation
-                discriminator_output, log_ratio = discriminator.get_log_ratio(...)
+                discriminator_output, _ = discriminator.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, img_size, class_labels)
             
                 # adjust d_prime with discriminator output and divide to make it compatible with previous d_cur
                 d_prime += w_DG_2 * (discriminator_output / t_next)
@@ -166,24 +164,16 @@ def edm_sampler(
 @click.option('--save_format',   help='Format for storing the generated samples', metavar='png|npz',                       type=click.Choice(['png', 'npz']), default='npz', show_default=True)
 @click.option('--device',   help='Device', metavar='STR',                       type=str, default='cuda:0', show_default=True)
 
+# denoise with the reverse-time generative process that includes the discriminator in the range [time_mid, time_max] (pages 26 and 27)
+# default values come from Table 8 page 21
+@click.option('--time_mid', help='Start time for applying the discriminator', metavar='FLOAT', type=click.FloatRange(0, 1), default=0.01, show_default=True)
+@click.option('--time_max', help='End time for applying the discriminator', metavar='FLOAT', type=click.FloatRange(0, 1), default=1, show_default=True)
 
-def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_samples, save_format,
+# Adaptive strategy is only applied to conditional generation as indicated in Table 8 page 21
+@click.option('--adaptive_weight',   help='Enable adaptive strategy to boost the DG weights?', is_flag=True)
+
+def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_samples, save_format, time_mid, time_max, adaptive_weight,
     network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device, **sampler_kwargs):
-    """Generate random images using the techniques described in the paper
-    "Elucidating the Design Space of Diffusion-Based Generative Models".
-
-    Examples:
-
-    \b
-    # Generate 64 images and save them as out/*.png
-    python generate.py --outdir=out --seeds=0-63 --batch=64 \\
-        --network=https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-cond-vp.pkl
-
-    \b
-    # Generate 1024 images using 2 GPUs
-    torchrun --standalone --nproc_per_node=2 generate.py --outdir=out --seeds=0-999 --batch=64 \\
-        --network=https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-cond-vp.pkl
-    """
     
     # Set manual seed for reproducibility
     random.seed(seed)
@@ -202,14 +192,13 @@ def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_sample
     # Load pretained discriminator network.
     if w_DG_1 != 0 or w_DG_2 != 0:
         print(f'Loading discriminator from "{discriminator_checkpoint}"...')
-        discriminator = get_discriminator(discriminator_checkpoint) # TO BE COMPLETED
+        discriminator = discriminator.get_discriminator(discriminator_checkpoint, device, conditioned=(net.label_dim and conditional)) 
     else:
         discriminator = None
     
     # Variance Preserving SDE (VPSDE) introduced in "Score-based generative modeling through stochastic differential equations"
     # Page 25: while score training is beneficial with WVE-SDE, discriminator training best fits with LVP-SDE. We, therefore, train the discriminator with LVP-SDE as default    
-    # TO BE COMPLETED
-    vpsde = get_vpsde() 
+    vpsde = discriminator.WVEtoLVP() 
 
     # Loop over batches.
     num_batches = math.ceil(num_samples / batch_size)
@@ -232,8 +221,7 @@ def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_sample
 
         # Generate images.
         sampler_kwargs = {key: value for key, value in sampler_kwargs.items() if value is not None}
-        # TO BE COMPLETED
-        images = edm_sampler(discriminator, w_DG_1, w_DG_2, net, latents, class_labels, randn_like=rnd.randn_like, **sampler_kwargs)
+        images = edm_sampler(discriminator, w_DG_1, w_DG_2, time_mid, time_max, adaptive_weight, vpsde, net, latents, class_labels, randn_like=rnd.randn_like, **sampler_kwargs)
 
         # Save images.
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
