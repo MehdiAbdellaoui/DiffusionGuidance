@@ -21,6 +21,7 @@ from torch_utils import distributed as dist
 
 import random
 import math
+import discriminator as discriminator_lib
 
 #----------------------------------------------------------------------------
 # Proposed EDM-G++ sampler 
@@ -85,7 +86,7 @@ def edm_sampler(
         # first order correction according to Heun solve (see page 21 of paper)
         if w_DG_1 != 0.:
 
-            discriminator_output, log_ratio = discriminator.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, img_size, class_labels)
+            discriminator_output, log_ratio = discriminator_lib.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, img_size, class_labels)
             
             if adaptive_weight:
                 # for every odd denoising steps (page 22 of paper)
@@ -111,7 +112,7 @@ def edm_sampler(
             # second order correction according to Heun solve (see page 21 of paper)
             if w_DG_2 != 0.:
                 
-                discriminator_output, _ = discriminator.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, img_size, class_labels)
+                discriminator_output, _ = discriminator_lib.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, img_size, class_labels)
             
                 # adjust d_prime with discriminator output and divide to make it compatible with previous d_cur
                 d_prime += w_DG_2 * (discriminator_output / t_next)
@@ -192,13 +193,13 @@ def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_sample
     # Load pretained discriminator network.
     if w_DG_1 != 0 or w_DG_2 != 0:
         print(f'Loading discriminator from "{discriminator_checkpoint}"...')
-        discriminator = discriminator.get_discriminator(discriminator_checkpoint, device, conditioned=(net.label_dim and conditional)) 
+        discriminator = discriminator_lib.get_discriminator(discriminator_checkpoint, device, conditioned=(net.label_dim and conditional)) 
     else:
         discriminator = None
     
     # Variance Preserving SDE (VPSDE) introduced in "Score-based generative modeling through stochastic differential equations"
     # Page 25: while score training is beneficial with WVE-SDE, discriminator training best fits with LVP-SDE. We, therefore, train the discriminator with LVP-SDE as default    
-    vpsde = discriminator.WVEtoLVP() 
+    vpsde = discriminator_lib.WVEtoLVP() 
 
     # Loop over batches.
     num_batches = math.ceil(num_samples / max_batch_size)
