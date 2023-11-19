@@ -242,6 +242,7 @@ def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_sample
             
             np.savez_compressed(image_path, images=images_np)
 
+
 #----------------------------------------------------------------------------
 
 if __name__ == "__main__":

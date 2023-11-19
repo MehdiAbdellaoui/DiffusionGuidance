@@ -1,8 +1,8 @@
 from guided_diffusion.script_util import create_classifier
 import torch
-import torch.nn as nn
+import math
 import numpy as np
-import os
+
 
 
 def load_discriminator(ckpt, device, grads=True, conditioned=True):
@@ -67,7 +67,7 @@ def get_discriminator_model(conditioned, ckpt=None):
         discriminator.load_state_dict(pretrained_discriminator)
     return discriminator
 
-def get_gradient_density_ratio(discriminator, vpsde, input_, std_wve_t, time_mid, time_max, img_size, class_labels)
+def get_gradient_density_ratio(discriminator, vpsde, input_, std_wve_t, time_mid, time_max, img_size, class_labels):
     
     # merging two checkpoints from different diffusion strategies (page 23)
     mean_tau, tau = vpsde.transform_WVE_to_LVP(std_wve_t)
