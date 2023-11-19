@@ -201,19 +201,19 @@ def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_sample
     vpsde = discriminator.WVEtoLVP() 
 
     # Loop over batches.
-    num_batches = math.ceil(num_samples / batch_size)
+    num_batches = math.ceil(num_samples / max_batch_size)
     
     print(f'Generating {num_samples} images to "{outdir}"...')
     
     for i in tqdm.tqdm(range(num_batches)):
 
         # Pick latents and labels.
-        latents = rnd.randn([batch_size, net.img_channels, net.img_resolution, net.img_resolution], device=device)
+        latents = torch.randn([max_batch_size, net.img_channels, net.img_resolution, net.img_resolution], device=device)
         
         class_labels = None
         
         if net.label_dim:
-            class_labels = torch.eye(net.label_dim, device=device)[rnd.randint(net.label_dim, size=[batch_size], device=device)]
+            class_labels = torch.eye(net.label_dim, device=device)[torch.randint(net.label_dim, size=[max_batch_size], device=device)]
         
         if class_idx is not None:
             class_labels[:, :] = 0
@@ -221,14 +221,14 @@ def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_sample
 
         # Generate images.
         sampler_kwargs = {key: value for key, value in sampler_kwargs.items() if value is not None}
-        images = edm_sampler(discriminator, w_DG_1, w_DG_2, time_mid, time_max, adaptive_weight, vpsde, net, latents, class_labels, randn_like=rnd.randn_like, **sampler_kwargs)
+        images = edm_sampler(discriminator, w_DG_1, w_DG_2, time_mid, time_max, adaptive_weight, vpsde, net, latents, class_labels, randn_like=torch.randn_like, **sampler_kwargs)
 
         # Save images.
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
 
         if save_format == 'png':
             for idx, image_np in enumerate(images_np):
-                index = i * batch_size + idx
+                index = i * max_batch_size + idx
                 image_path = os.path.join(outdir, f'{index:06d}.png')
                 PIL.Image.fromarray(image_np, 'RGB').save(image_path)
         elif save_format == 'npz':
