@@ -5,6 +5,34 @@ import numpy as np
 import os
 
 
+def load_discriminator(ckpt, device, grads=True, conditioned=True):
+    """
+    Examples:
+        evaluate = load_discriminator('models/discriminator_epoch99.pt', device, conditioned=True)
+        evaluate(noisy_images, t, cond)
+
+    Args:
+        ckpt: Path to discriminator checkpoint
+        device: Choose to load model to CPU or GPU
+        grads: Choose whether torch grads should be active during evaluation
+        conditioned: Whether the checkpoint loads a conditioned model or not
+
+    Returns: A discriminator evaluation function
+
+    """
+    # Load the complete discriminator and return the evaluation function
+    adm_model = get_ADM_model().to(device)
+    discriminator = get_discriminator_model(conditioned, ckpt).to(device)
+
+    def evaluate(x, t, cond=None):
+        with torch.enable_grad() if grads else torch.no_grad():
+            feature_x = adm_model(x, t, cond, features=True, sigmoid=False)
+            output = discriminator(feature_x, t, cond, features=False, sigmoid=True)[:, 0]
+        return output
+
+    return evaluate
+
+
 # Create the ADM model as explained in the paper and the given ADM checkpoint
 def get_ADM_model():
     adm_classifier = create_classifier(
@@ -23,7 +51,7 @@ def get_ADM_model():
 
 
 # Create the discriminator as given in the paper
-def get_discriminator_model(conditioned):
+def get_discriminator_model(conditioned, ckpt=None):
     discriminator = create_classifier(
         image_size=8,
         classifier_in_channels=512,
@@ -34,6 +62,9 @@ def get_discriminator_model(conditioned):
         classifier_pool='attention',
         conditioned=conditioned
     )
+    if ckpt is not None:
+        pretrained_discriminator = torch.load(ckpt)
+        discriminator.load_state_dict(pretrained_discriminator)
     return discriminator
 
 
@@ -46,6 +77,7 @@ class WVEtoLVP:
         self.T = 1.     # For u sampled uniformly from [0, T]
 
     def transform_to_tau(self, var_wve_t):
+        # See page 24 for derivation and explanation
         temp = self.beta_min ** 2 + 2. * (self.beta_max - self.beta_min) * torch.log(1. + var_wve_t)
         tau = (-self.beta_min + torch.sqrt(temp)) / (self.beta_max - self.beta_min)
         return tau

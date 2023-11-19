@@ -4,7 +4,7 @@ import click
 import torch.utils.data as data
 import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
-from discriminator import get_discriminator_model, get_ADM_model, WVEtoLVP
+from discriminator import get_discriminator_model, get_ADM_model, WVEtoLVP, load_discriminator
 from keras.datasets import cifar10
 import dnnlib
 
@@ -120,17 +120,17 @@ def main(**kwargs):
         plot_epochs.append(i)
 
     # Plotting training stats
-    plt.plot(plot_epochs, plot_loss, label='Training data')
-    plt.title('Discriminator training loss per epoch')
-    plt.xlabel('Number of Epochs')
-    plt.ylabel('Mean Loss (BCE)')
-    plt.legend()
-    plt.show()
-    plt.plot(plot_epochs, plot_accuracy, label='Training data')
-    plt.title('Discriminator training accuracy per epoch')
-    plt.xlabel('Number of Epochs')
-    plt.ylabel('Mean Accuracy')
-    plt.legend()
+    fig, ax1 = plt.subplots()
+    ax1.set_xlabel('Number of Epochs')
+    ax1.set_ylabel('Mean Loss (BCE)')
+    ax1.plot(plot_epochs, plot_loss, label='Mean Loss (BCE)')
+    ax1.legend()
+
+    color = 'tab:orange'
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('Mean Accuracy')
+    ax2.plot(plot_epochs, plot_accuracy, label='Mean Accuracy', color=color)
+    ax2.legend()
     plt.show()
 
 
