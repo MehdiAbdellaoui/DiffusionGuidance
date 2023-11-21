@@ -12,6 +12,7 @@ __pycache__/
 # models
 *.pt
 *.npz
+*.pkl
 
 # Distribution / packaging
 .Python

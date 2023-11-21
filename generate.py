@@ -27,7 +27,7 @@ import discriminator as discriminator_lib
 # Proposed EDM-G++ sampler 
 
 def edm_sampler(
-    discriminator, w_DG_1, w_DG_2, time_mid, time_max, adaptive_weight, vpsde,
+    discriminator, w_dg_1, w_dg_2, time_mid, time_max, adaptive_weight, vpsde,
     net, latents, class_labels=None, randn_like=torch.randn_like,
     num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
     S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
@@ -84,7 +84,7 @@ def edm_sampler(
         d_cur = (x_hat - denoised) / t_hat.reshape(x_hat.shape)
         
         # first order correction according to Heun solve (see page 21 of paper)
-        if w_DG_1 != 0.:
+        if w_dg_1 != 0.:
 
             discriminator_output, log_ratio = discriminator_lib.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, img_size, class_labels)
             
@@ -92,12 +92,12 @@ def edm_sampler(
                 # for every odd denoising steps (page 22 of paper)
                 if i % period_weight == 0:
                     # for such samples with density-ratio less than 0 (page 22 of paper)
-                    # instead of setting w_DG_1 = 2 instead of w_DG_1 = 1 in this case
+                    # instead of setting w_dg_1 = 2 instead of w_dg_1 = 1 in this case
                     # we equivalently operate on the output of the discriminator
                     discriminator_output[log_ratio < 0.] *= 2 
         
             # adjust d_cur with discriminator output and divide to make it compatible with previous d_cur
-            d_cur += w_DG_1 * (discriminator_output / t_hat.reshape(x_hat.shape))
+            d_cur += w_dg_1 * (discriminator_output / t_hat.reshape(x_hat.shape))
 
         # adapted due to vectorized version of t_hat
         x_next = x_hat + (t_next - t_hat).reshape(x_hat.shape) * d_cur
@@ -110,12 +110,12 @@ def edm_sampler(
             d_prime = (x_next - denoised) / t_next
             
             # second order correction according to Heun solve (see page 21 of paper)
-            if w_DG_2 != 0.:
+            if w_dg_2 != 0.:
                 
                 discriminator_output, _ = discriminator_lib.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, img_size, class_labels)
             
                 # adjust d_prime with discriminator output and divide to make it compatible with previous d_cur
-                d_prime += w_DG_2 * (discriminator_output / t_next)
+                d_prime += w_dg_2 * (discriminator_output / t_next)
 
             # adapted due to vectorized version of t_hat
             x_next = x_hat + (t_next - t_hat).reshape(x_hat.shape) * (0.5 * d_cur + 0.5 * d_prime)
@@ -152,8 +152,8 @@ def edm_sampler(
 
 # Configuration
 # Default values come from Figure 21 of page 22
-@click.option('--w_DG_1',                     help='Weight for 1st order DG', metavar='FLOAT',                              type=click.FloatRange(min=0), default=2, show_default=True)
-@click.option('--w_DG_2',                     help='Weight for 2nd order DG', metavar='FLOAT',                              type=click.FloatRange(min=0), default=0, show_default=True)
+@click.option('--w_dg_1',  help='Weight for 1st order DG', metavar='FLOAT',  type=click.FloatRange(min=0.), default=2., show_default=True)
+@click.option('--w_dg_2',  help='Weight for 2nd order DG', metavar='FLOAT',  type=click.FloatRange(min=0.), default=0., show_default=True)
 
 # Discriminator checkpoint and architecture
 @click.option('--discriminator_checkpoint',   help='Path to discriminator checkpoint', metavar='STR',                       type=str, default='', show_default=True)
@@ -173,8 +173,7 @@ def edm_sampler(
 # Adaptive strategy is only applied to conditional generation as indicated in Table 8 page 21
 @click.option('--adaptive_weight',   help='Enable adaptive strategy to boost the DG weights?', is_flag=True)
 
-def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_samples, save_format, time_mid, time_max, adaptive_weight,
-    network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device, **sampler_kwargs):
+def main(w_dg_1, w_dg_2, discriminator_checkpoint, conditional, seed, num_samples, save_format, time_mid, time_max, adaptive_weight, network_pkl, outdir, class_idx, max_batch_size, device, **sampler_kwargs):
     
     # Set manual seed for reproducibility
     random.seed(seed)
@@ -191,9 +190,9 @@ def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_sample
         net = pickle.load(f)['ema'].to(device)
     
     # Load pretained discriminator network.
-    if w_DG_1 != 0 or w_DG_2 != 0:
+    if w_dg_1 != 0 or w_dg_2 != 0:
         print(f'Loading discriminator from "{discriminator_checkpoint}"...')
-        discriminator = discriminator_lib.get_discriminator(discriminator_checkpoint, device, conditioned=(net.label_dim and conditional)) 
+        discriminator = discriminator_lib.load_discriminator(discriminator_checkpoint, device, conditioned=(net.label_dim and conditional)) 
     else:
         discriminator = None
     
@@ -222,7 +221,7 @@ def main(w_DG_1, w_DG_2, discriminator_checkpoint, conditional, seed, num_sample
 
         # Generate images.
         sampler_kwargs = {key: value for key, value in sampler_kwargs.items() if value is not None}
-        images = edm_sampler(discriminator, w_DG_1, w_DG_2, time_mid, time_max, adaptive_weight, vpsde, net, latents, class_labels, randn_like=torch.randn_like, **sampler_kwargs)
+        images = edm_sampler(discriminator, w_dg_1, w_dg_2, time_mid, time_max, adaptive_weight, vpsde, net, latents, class_labels, randn_like=torch.randn_like, **sampler_kwargs)
 
         # Save images.
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
