@@ -75,18 +75,20 @@ def edm_sampler(
         t_hat = net.round_sigma(t_cur + gamma * t_cur) 
         
         # adapted due to vectorized version of t_hat and S_noise 
-        x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt().reshape(x_cur.shape) * S_noise_vector.reshape(x_cur.shape) * randn_like(x_cur)
+        #x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt().reshape(x_cur.shape) * S_noise_vector.reshape(x_cur.shape) * randn_like(x_cur)
+        x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt()[:, None, None, None] * S_noise_vector[:, None, None, None] * randn_like(x_cur)
 
         # Euler step.
         denoised = net(x_hat, t_hat, class_labels).to(torch.float64)
         
         # adapted due to vectorized version of t_hat
-        d_cur = (x_hat - denoised) / t_hat.reshape(x_hat.shape)
+        #d_cur = (x_hat - denoised) / t_hat.reshape(x_hat.shape)
+        d_cur = (x_hat - denoised) / t_hat[:, None, None, None]
         
         # first order correction according to Heun solve (see page 21 of paper)
         if w_dg_1 != 0.:
 
-            discriminator_output, log_ratio = discriminator_lib.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, img_size, class_labels)
+            discriminator_output, log_ratio = discriminator_lib.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, net.img_resolution, class_labels)
             
             if adaptive_weight:
                 # for every odd denoising steps (page 22 of paper)
@@ -97,10 +99,11 @@ def edm_sampler(
                     discriminator_output[log_ratio < 0.] *= 2 
         
             # adjust d_cur with discriminator output and divide to make it compatible with previous d_cur
-            d_cur += w_dg_1 * (discriminator_output / t_hat.reshape(x_hat.shape))
+            d_cur += w_dg_1 * (discriminator_output / t_hat[:, None, None, None]) #.reshape(x_hat.shape))
 
         # adapted due to vectorized version of t_hat
-        x_next = x_hat + (t_next - t_hat).reshape(x_hat.shape) * d_cur
+        #x_next = x_hat + (t_next - t_hat).reshape(x_hat.shape) * d_cur
+        x_next = x_hat + (t_next - t_hat)[:, None, None, None] * d_cur
         
         # Apply 2nd order correction.
         if i < num_steps - 1: # otherwise t_next is not available
@@ -112,13 +115,14 @@ def edm_sampler(
             # second order correction according to Heun solve (see page 21 of paper)
             if w_dg_2 != 0.:
                 
-                discriminator_output, _ = discriminator_lib.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, img_size, class_labels)
+                discriminator_output, _ = discriminator_lib.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, net.img_resolution, class_labels)
             
                 # adjust d_prime with discriminator output and divide to make it compatible with previous d_cur
                 d_prime += w_dg_2 * (discriminator_output / t_next)
 
             # adapted due to vectorized version of t_hat
-            x_next = x_hat + (t_next - t_hat).reshape(x_hat.shape) * (0.5 * d_cur + 0.5 * d_prime)
+            #x_next = x_hat + (t_next - t_hat).reshape(x_hat.shape) * (0.5 * d_cur + 0.5 * d_prime)
+            x_next = x_hat + (t_next - t_hat)[:, None, None, None] * (0.5 * d_cur + 0.5 * d_prime)
 
     return x_next
 

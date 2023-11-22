@@ -62,9 +62,28 @@ def get_discriminator_model(conditioned, ckpt=None):
         classifier_pool='attention',
         conditioned=conditioned
     )
+    
     if ckpt is not None:
         pretrained_discriminator = torch.load(ckpt)
-        discriminator.load_state_dict(pretrained_discriminator)
+        
+        '''
+        print(f'Expected length {len(discriminator.state_dict().items())}')
+
+        for key, value in discriminator.state_dict().items():
+            print(key)
+        
+        print(f'Pretrained length {len(pretrained_discriminator.items())}')
+
+        for key, value in pretrained_discriminator.items():
+            print(key)
+        '''
+        
+        #print(pretrained_discriminator['label_emb.weight'])
+
+        # pretrained_discriminator has additional label_emb.weight key
+        # this happens when num_classes in None when the discriminator is not conditioned
+        discriminator.load_state_dict(pretrained_discriminator, strict=False)
+
     return discriminator
 
 def get_gradient_density_ratio(discriminator, vpsde, input_, std_wve_t, time_mid, time_max, img_size, class_labels):
@@ -76,12 +95,14 @@ def get_gradient_density_ratio(discriminator, vpsde, input_, std_wve_t, time_mid
     if tau.min() > time_max or tau.min() < time_mid or discriminator == None:
         return torch.zeros_like(input_), torch.ones(input_.shape[0], device=input_.device) * 1e9  
    
-    input_ = mean_tau.reshape(input_.shape) * input_
+    #input_ = mean_tau.reshape(input_.shape) * input_
+    input_ = mean_tau[:,None,None,None] * input_
 
     with torch.enable_grad():
         # add gradient to input 
-        x_ = torch.tensor(input_, dtype=torch.float64, requires_grad=True)
-        
+        #x_ = torch.tensor(input_, dtype=torch.double, requires_grad=True)
+        x_ = input_.float().clone().detach().requires_grad_()
+
         # classifier checkpoints are trained with Linear VP for 32x32 and Cosine VP for 64x64 (page 23)
         if img_size == 64:
             tau = vpsde.get_cosine_time_from_linear_time(tau)
@@ -92,7 +113,7 @@ def get_gradient_density_ratio(discriminator, vpsde, input_, std_wve_t, time_mid
 
         discriminator_score = torch.autograd.grad(outputs=density_log_ratio.sum(), inputs=x_, retain_graph=False)[0]
     
-        discriminator_score *= - ((std_wve_t.reshape(discriminator_score.shape) ** 2) * mean_tau.reshape(discriminator_score.shape))
+        discriminator_score *= - ((std_wve_t[:,None,None,None] ** 2) * mean_tau[:,None,None,None])
         
         return discriminator_score, density_log_ratio
 
