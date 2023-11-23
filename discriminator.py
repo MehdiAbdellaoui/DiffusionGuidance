@@ -86,6 +86,7 @@ def get_discriminator_model(conditioned, ckpt=None):
 
     return discriminator
 
+
 def get_gradient_density_ratio(discriminator, vpsde, input_, std_wve_t, time_mid, time_max, img_size, class_labels):
     
     # merging two checkpoints from different diffusion strategies (page 23)
@@ -112,10 +113,10 @@ def get_gradient_density_ratio(discriminator, vpsde, input_, std_wve_t, time_mid
         density_log_ratio = get_density_log_ratio(discriminator, x_, tau, class_labels)
 
         discriminator_score = torch.autograd.grad(outputs=density_log_ratio.sum(), inputs=x_, retain_graph=False)[0]
-    
-        discriminator_score *= - ((std_wve_t[:,None,None,None] ** 2) * mean_tau[:,None,None,None])
-        
-        return discriminator_score, density_log_ratio
+        discriminator_score *= - ((std_wve_t[:,None,None,None] ** 2) * mean_tau[:,None,None,None]).to(torch.float64)
+
+    return discriminator_score, density_log_ratio
+
 
 def get_density_log_ratio(discriminator, x_, tau, class_labels):
     
@@ -127,6 +128,7 @@ def get_density_log_ratio(discriminator, x_, tau, class_labels):
     density_log_ratio = torch.log(prediction / (1. - prediction))
     
     return density_log_ratio
+
 
 # Implemented based on page 24 and 15
 class WVEtoLVP:
