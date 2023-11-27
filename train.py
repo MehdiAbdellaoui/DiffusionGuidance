@@ -10,16 +10,17 @@ import dnnlib
 
 
 class CustomDataset(data.Dataset):
-    def __init__(self, data, labels, cond=None):
+    def __init__(self, data, labels, cond=None, transform=transforms.ToTensor()):
         self.data = data
         self.labels = labels
         self.cond = cond
+        self.transform = transform
 
     def __getitem__(self, item):
         if self.cond is None:
-            return self.data[item], self.labels[item]
+            return self.transform(self.data[item]), self.labels[item]
         else:
-            return self.data[item], self.labels[item], self.cond[item]
+            return self.transform(self.data[item]), self.labels[item], self.cond[item]
 
     def __len__(self):
         return len(self.data)
@@ -38,25 +39,26 @@ def main(**kwargs):
 
     # Load images and discriminator labels
     true_data, true_cond = cifar10.load_data()[0]
-    true_data = torch.from_numpy(true_data)
+    fake_data = np.load(opts.sample_dir)['images']
 
-    fake_data = torch.from_numpy(np.load(opts.sample_dir)['images'])
-    training_data = torch.concatenate((true_data, fake_data)).permute(0, 3, 1, 2)
+    training_data = np.concatenate((true_data, fake_data))
     training_lbl = torch.concatenate((torch.ones(true_data.shape[0]), torch.zeros(fake_data.shape[0])))
 
+    transform = transforms.Compose([transforms.ToTensor()])
     # If conditioned on class, load those aswell
     if opts.cond:
         true_cond = np.eye(10)[true_cond.squeeze()]
         fake_cond = np.load(opts.sample_dir)['labels']
         training_cond = torch.from_numpy(np.concatenate((true_cond, fake_cond)))
         # Create a data set that returns each item
-        dataset = CustomDataset(training_data, training_lbl, training_cond)
+        dataset = CustomDataset(training_data, training_lbl, training_cond, transform=transform)
     else:
-        dataset = CustomDataset(training_data, training_lbl)
+        dataset = CustomDataset(training_data, training_lbl, transform=transform)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # Set up training and custom loss function.
     loss_fun = torch.nn.BCELoss()
+    # Used to scale input values between -1 and 1, source of nasty bug
     scaler = lambda x: 2. * x - 1
     adm_feature_extraction = get_ADM_model().to(device)
     discriminator = get_discriminator_model(opts.cond).to(device)
@@ -91,7 +93,6 @@ def main(**kwargs):
             # Get times via importance sampling
             t = importance_sampling.generate_diffusion_times(n_samples, device)
             mean, std = importance_sampling.marginal_prob(t)
-
             # Generate noise
             e = torch.randn_like(image)
             # Apply noise by expanding the mean and std values to fit with the image and noise
@@ -113,8 +114,8 @@ def main(**kwargs):
                 print('                                                                                    ', end='\r')
                 print(f'Epoch {i}: Loss: {np.mean(batch_loss)}, Accuracy: {np.mean(batch_accuracy)}', end='\r')
         # Save every epoch if anything happens
-        torch.save(discriminator.state_dict(), f"models/discrim_uncond_epoch{i}.pt")
-
+        torch.save(discriminator.state_dict(), f"models/cond_disc/discrim_cond_epoch{i}.pt")
+        print(f'Epoch {i}: Loss: {np.mean(batch_loss)}, Accuracy: {np.mean(batch_accuracy)}')
         # For plotting the training
         plot_loss.append(np.mean(batch_loss))
         plot_accuracy.append(np.mean(batch_accuracy))

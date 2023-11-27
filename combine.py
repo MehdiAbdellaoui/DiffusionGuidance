@@ -30,13 +30,13 @@ def combine_npz(file_names, num_batches, save_name, conditional):
 
 
 if __name__ == '__main__':
-    combine = False
+    combine = True
     if combine is True:
         # Combine into 5 batches with 10000 images and labels in each batch
-        num_files = 100
+        num_files = 500
         file_names = ['training_data/conditional_' + str(i) for i in range(num_files)]
-        save_name = 'training_data/original_250pt_'
-        combine_npz(file_names, 1, save_name, True)
+        save_name = 'training_data/cond_disc_249pt_'
+        combine_npz(file_names, 1, save_name, False)
     else:
         # Check such that the combined batches are not duplicates
         file = np.load('training_data/conditional_0.npz')

@@ -57,7 +57,7 @@ def get_discriminator_model(conditioned, ckpt=None):
         classifier_out_channels=1,
         classifier_width=128,
         classifier_depth=2,
-        classifier_attention_resolutions="8",
+        classifier_attention_resolutions="32,16,8",
         classifier_pool='attention',
         conditioned=conditioned
     )
