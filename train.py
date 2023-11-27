@@ -28,8 +28,10 @@ class CustomDataset(data.Dataset):
 
 @click.command()
 @click.option('--sample_dir',                  help='Sample directory',       metavar='PATH',    type=str, required=True,     default="training_data/conditional_edm_samples/edm_cond_samples.npz")
+@click.option('--save_dir',                    help='Save directory',         metavar='PATH',    type=str,                    default="models/cond_disc/")
 @click.option('--cond',                        help='Is it conditional?',     metavar='BOOL',    type=click.IntRange(min=0),  default=1)
 @click.option('--batch_size',                  help='Batch size',             metavar='INT',     type=click.IntRange(min=1),  default=128)
+@click.option('--num_gen_samples',             help='Number of generated images',                metavar='INT',     type=click.IntRange(min=1),  default=50000)
 @click.option('--n_epochs',                    help='Num epochs',             metavar='INT',     type=click.IntRange(min=1),  default=60)
 @click.option('--lr',                          help='Learning rate',          metavar='FLOAT',   type=click.FloatRange(min=0),default=3e-4)
 @click.option('--wd',                          help='Weight decay',           metavar='FLOAT',   type=click.FloatRange(min=0),default=1e-7)
@@ -39,7 +41,7 @@ def main(**kwargs):
 
     # Load images and discriminator labels
     true_data, true_cond = cifar10.load_data()[0]
-    fake_data = np.load(opts.sample_dir)['images']
+    fake_data = np.load(opts.sample_dir)['images'][:opts.num_gen_samples]
 
     training_data = np.concatenate((true_data, fake_data))
     training_lbl = torch.concatenate((torch.ones(true_data.shape[0]), torch.zeros(fake_data.shape[0])))
@@ -48,7 +50,7 @@ def main(**kwargs):
     # If conditioned on class, load those aswell
     if opts.cond:
         true_cond = np.eye(10)[true_cond.squeeze()]
-        fake_cond = np.load(opts.sample_dir)['labels']
+        fake_cond = np.load(opts.sample_dir)['labels'][:opts.num_gen_samples]
         training_cond = torch.from_numpy(np.concatenate((true_cond, fake_cond)))
         # Create a data set that returns each item
         dataset = CustomDataset(training_data, training_lbl, training_cond, transform=transform)
@@ -114,7 +116,7 @@ def main(**kwargs):
                 print('                                                                                    ', end='\r')
                 print(f'Epoch {i}: Loss: {np.mean(batch_loss)}, Accuracy: {np.mean(batch_accuracy)}', end='\r')
         # Save every epoch if anything happens
-        torch.save(discriminator.state_dict(), f"models/cond_disc/discrim_cond_epoch{i}.pt")
+        torch.save(discriminator.state_dict(), opts.save_dir + f"discrim_uncond_epoch{i}.pt")
         print(f'Epoch {i}: Loss: {np.mean(batch_loss)}, Accuracy: {np.mean(batch_accuracy)}')
         # For plotting the training
         plot_loss.append(np.mean(batch_loss))
