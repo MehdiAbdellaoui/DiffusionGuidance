@@ -29,9 +29,9 @@ class CustomDataset(data.Dataset):
 @click.option('--sample_dir',                  help='Sample directory',       metavar='PATH',    type=str, required=True,     default="training_data/conditional_edm_samples/edm_cond_samples.npz")
 @click.option('--cond',                        help='Is it conditional?',     metavar='BOOL',    type=click.IntRange(min=0),  default=1)
 @click.option('--batch_size',                  help='Batch size',             metavar='INT',     type=click.IntRange(min=1),  default=128)
-@click.option('--n_epochs',                    help='Num epochs',             metavar='INT',     type=click.IntRange(min=1),  default=50)
+@click.option('--n_epochs',                    help='Num epochs',             metavar='INT',     type=click.IntRange(min=1),  default=60)
 @click.option('--lr',                          help='Learning rate',          metavar='FLOAT',   type=click.FloatRange(min=0),default=3e-4)
-@click.option('--wd',                          help='Weight decay',           metavar='FLOAT',   type=click.FloatRange(min=0),default=0)
+@click.option('--wd',                          help='Weight decay',           metavar='FLOAT',   type=click.FloatRange(min=0),default=1e-7)
 def main(**kwargs):
     # Load the arguments
     opts = dnnlib.EasyDict(kwargs)
@@ -110,9 +110,10 @@ def main(**kwargs):
             batch_accuracy.append(accuracy.item())
             # Print every 20 batches
             if j % 20 == 0:
-                print(f'Epoch {i}: Loss: {np.mean(batch_loss)}, Accuracy: {np.mean(batch_accuracy)}')
+                print('                                                                                    ', end='\r')
+                print(f'Epoch {i}: Loss: {np.mean(batch_loss)}, Accuracy: {np.mean(batch_accuracy)}', end='\r')
         # Save every epoch if anything happens
-        torch.save(discriminator.state_dict(), f"models/discriminator_epoch{i}.pt")
+        torch.save(discriminator.state_dict(), f"models/discrim_uncond_epoch{i}.pt")
 
         # For plotting the training
         plot_loss.append(np.mean(batch_loss))

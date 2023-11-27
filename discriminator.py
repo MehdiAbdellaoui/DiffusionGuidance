@@ -4,7 +4,6 @@ import math
 import numpy as np
 
 
-
 def load_discriminator(ckpt, device, grads=True, conditioned=True):
     """
     Examples:
@@ -57,7 +56,7 @@ def get_discriminator_model(conditioned, ckpt=None):
         classifier_in_channels=512,
         classifier_out_channels=1,
         classifier_width=128,
-        classifier_depth=4,
+        classifier_depth=2,
         classifier_attention_resolutions="8",
         classifier_pool='attention',
         conditioned=conditioned
@@ -82,7 +81,7 @@ def get_discriminator_model(conditioned, ckpt=None):
 
         # pretrained_discriminator has additional label_emb.weight key
         # this happens when num_classes in None when the discriminator is not conditioned
-        discriminator.load_state_dict(pretrained_discriminator, strict=False)
+        discriminator.load_state_dict(pretrained_discriminator)
 
     return discriminator
 
@@ -97,7 +96,7 @@ def get_gradient_density_ratio(discriminator, vpsde, input_, std_wve_t, time_mid
         return torch.zeros_like(input_), torch.ones(input_.shape[0], device=input_.device) * 1e9  
    
     #input_ = mean_tau.reshape(input_.shape) * input_
-    input_ = mean_tau[:,None,None,None] * input_
+    input_ = mean_tau[:, None, None, None] * input_
 
     with torch.enable_grad():
         # add gradient to input 
@@ -180,6 +179,7 @@ class WVEtoLVP:
         cosine_time = self.T * ((1. + s) * 2. / np.pi * time - s)
         
         return cosine_time
+
 
 if __name__ == '__main__':
     get_ADM_model()

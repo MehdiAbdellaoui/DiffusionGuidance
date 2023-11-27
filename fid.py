@@ -14,11 +14,11 @@ import numpy as np
 import scipy.linalg
 import torch
 import dnnlib
-import random
-from glob import glob
+
 #----------------------------------------------------------------------------
 
-def calculate_inception_stats_npz(image_path, num_samples=50000, device=torch.device('cuda'),
+
+def calculate_inception_stats_npz(image_path, num_samples=50000, samples_per_batch=500, device=torch.device('cuda'),
 ):
     print('Loading Inception-v3 model...')
     detector_url = 'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/metrics/inception-2015-12-05.pkl'
@@ -31,13 +31,16 @@ def calculate_inception_stats_npz(image_path, num_samples=50000, device=torch.de
     mu = torch.zeros([feature_dim], dtype=torch.float64, device=device)
     sigma = torch.zeros([feature_dim, feature_dim], dtype=torch.float64, device=device)
 
-    files = glob(os.path.join(image_path, 'samples*.npz'))
-    random.shuffle(files)
+    # Load and shuffle images
+    files = np.load(image_path)['images']
+    #random_shuffle = np.random.permutation(files.shape[0])
+    #files = files[random_shuffle, :, :, :]
+    print(files.shape)
     count = 0
-
-    for file in files:
-
-        images = np.load(file)["samples"]
+    num_batch_images = samples_per_batch
+    num_batches = int(num_samples / num_batch_images)
+    for i in range(num_batches):
+        images = files[i * num_batch_images:(i + 1) * num_batch_images]
         images = torch.tensor(images).permute(0, 3, 1, 2).to(device)
         features = detector_net(images, **detector_kwargs).to(torch.float64)
         if count + images.shape[0] > num_samples:
@@ -47,10 +50,12 @@ def calculate_inception_stats_npz(image_path, num_samples=50000, device=torch.de
         mu += features[:remaining_num_samples].sum(0)
         sigma += features[:remaining_num_samples].T @ features[:remaining_num_samples]
         count = count + remaining_num_samples
-        print(count)
+        # Scuffed way of writing to the same line
+        print('                               ', end='\r')
+        print(f'Progress: {i / num_batches}%', end='\r')
         if count >= num_samples:
             break
-
+    print('                               ')
     print(count)
     mu /= num_samples
     sigma -= mu.ger(mu) * num_samples
@@ -71,21 +76,20 @@ def calculate_fid_from_inception_stats(mu, sigma, mu_ref, sigma_ref):
 @click.option('--images', 'image_path', help='Path to the images', metavar='PATH|ZIP',              type=str, required=True)
 @click.option('--ref', 'ref_path',      help='Dataset reference statistics ', metavar='NPZ|URL',    type=str, required=True)
 @click.option('--num_samples', metavar='INT', default=50000)
-@click.option('--device', metavar='STR', default='cuda:0')
-
-def main(image_path, ref_path, num_samples, device):
+@click.option('--samples_per_batch', metavar='INT', default=100)
+@click.option('--device', metavar='STR', default='cuda')
+def main(image_path, ref_path, num_samples, samples_per_batch, device):
     """Calculate FID for a given set of images."""
-    image_path = os.getcwd() + image_path
-    ref_path = os.getcwd() + ref_path
-
-
     print(f'Loading dataset reference statistics from "{ref_path}"...')
     with dnnlib.util.open_url(ref_path) as f:
         ref = dict(np.load(f))
-    mu, sigma = calculate_inception_stats_npz(image_path=image_path, num_samples=num_samples, device=device)
+    mu, sigma = calculate_inception_stats_npz(image_path=image_path, num_samples=num_samples,
+                                              samples_per_batch=samples_per_batch, device=device)
+    #np.savez_compressed('training_data/CIFAR_ref/cifar10-32x32-10K.npz', mu=mu, sigma=sigma)
     print('Calculating FID...')
     fid = calculate_fid_from_inception_stats(mu, sigma, ref['mu'], ref['sigma'])
     print(f'{image_path.split("/")[-1]}, {fid:g}')
+
 
 #----------------------------------------------------------------------------
 

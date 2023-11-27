@@ -882,7 +882,8 @@ class EncoderUNetModel(nn.Module):
         :param labels: a [N x ...] tensor of one-hot encodings
         :return: an [N x K] Tensor of outputs.
         """
-
+        # Used in their code and we're using their pretrained ADM model, so we need it here too
+        timesteps = timesteps * 999.
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
         if self.num_classes is not None:

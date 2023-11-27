@@ -89,14 +89,13 @@ def edm_sampler(
         if w_dg_1 != 0.:
 
             discriminator_output, log_ratio = discriminator_lib.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, net.img_resolution, class_labels)
-            
             if adaptive_weight:
                 # for every odd denoising steps (page 22 of paper)
                 if i % period_weight == 0:
                     # for such samples with density-ratio less than 0 (page 22 of paper)
                     # instead of setting w_dg_1 = 2 instead of w_dg_1 = 1 in this case
                     # we equivalently operate on the output of the discriminator
-                    discriminator_output[log_ratio < 0.] *= 2 
+                    discriminator_output[log_ratio < 0.] *= 2
         
             # adjust d_cur with discriminator output and divide to make it compatible with previous d_cur
             d_cur += w_dg_1 * (discriminator_output / t_hat[:, None, None, None]) #.reshape(x_hat.shape))
@@ -116,7 +115,7 @@ def edm_sampler(
             if w_dg_2 != 0.:
                 
                 discriminator_output, _ = discriminator_lib.get_gradient_density_ratio(discriminator, vpsde, x_hat, t_hat, time_mid, time_max, net.img_resolution, class_labels)
-            
+
                 # adjust d_prime with discriminator output and divide to make it compatible with previous d_cur
                 d_prime += w_dg_2 * (discriminator_output / t_next)
 
@@ -161,13 +160,13 @@ def edm_sampler(
 
 # Discriminator checkpoint and architecture
 @click.option('--discriminator_checkpoint',   help='Path to discriminator checkpoint', metavar='STR',                       type=str, default='', show_default=True)
-@click.option('--conditional',   help='Conditional discriminator?', is_flag=True)
+@click.option('--conditional',   help='Conditional discriminator?', metavar='INT', type=click.IntRange(min=0, max=1), default=0)
 
 # Sampling configuration
 @click.option('--seed', help='Seed value', metavar='INT',                                type=click.IntRange(min=0), default=0, show_default=True)
 @click.option('--num_samples', help='Number of samples to generates', metavar='INT',                                type=click.IntRange(min=1), default=50000, show_default=True)
 @click.option('--save_format',   help='Format for storing the generated samples', metavar='png|npz',                       type=click.Choice(['png', 'npz']), default='npz', show_default=True)
-@click.option('--device',   help='Device', metavar='STR',                       type=str, default='cuda:0', show_default=True)
+@click.option('--device',   help='Device', metavar='STR',                       type=str, default='cuda', show_default=True)
 
 # denoise with the reverse-time generative process that includes the discriminator in the range [time_mid, time_max] (pages 26 and 27)
 # default values come from Table 8 page 21
@@ -175,10 +174,9 @@ def edm_sampler(
 @click.option('--time_max', help='End time for applying the discriminator', metavar='FLOAT', type=click.FloatRange(0, 1), default=1, show_default=True)
 
 # Adaptive strategy is only applied to conditional generation as indicated in Table 8 page 21
-@click.option('--adaptive_weight',   help='Enable adaptive strategy to boost the DG weights?', is_flag=True)
+@click.option('--adaptive_weight',   help='Enable adaptive strategy to boost the DG weights?', metavar='INT', type=click.IntRange(min=0, max=1), default=1)
 
 def main(w_dg_1, w_dg_2, discriminator_checkpoint, conditional, seed, num_samples, save_format, time_mid, time_max, adaptive_weight, network_pkl, outdir, class_idx, max_batch_size, device, **sampler_kwargs):
-    
     # Set manual seed for reproducibility
     random.seed(seed)
     np.random.seed(seed)
@@ -189,10 +187,13 @@ def main(w_dg_1, w_dg_2, discriminator_checkpoint, conditional, seed, num_sample
     device = torch.device(device)
 
     # Load pretained score network.
-    print(f'Loading network from "{network_pkl}"...')
-    with open(network_pkl, 'rb') as f:
+    #print(f'Loading network from "{network_pkl}"...')
+    #with open(network_pkl, 'rb') as f:
+        #net = pickle.load(f)['ema'].to(device)
+
+    dist.print0(f'Loading network from "{network_pkl}"...')
+    with dnnlib.util.open_url(network_pkl, verbose=(dist.get_rank() == 0)) as f:
         net = pickle.load(f)['ema'].to(device)
-    
     # Load pretained discriminator network.
     if w_dg_1 != 0 or w_dg_2 != 0:
         print(f'Loading discriminator from "{discriminator_checkpoint}"...')
@@ -229,7 +230,6 @@ def main(w_dg_1, w_dg_2, discriminator_checkpoint, conditional, seed, num_sample
 
         # Save images.
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
-
         if save_format == 'png':
             for idx, image_np in enumerate(images_np):
                 index = i * max_batch_size + idx
@@ -237,14 +237,14 @@ def main(w_dg_1, w_dg_2, discriminator_checkpoint, conditional, seed, num_sample
                 PIL.Image.fromarray(image_np, 'RGB').save(image_path)
         elif save_format == 'npz':
             if class_labels is None:
-                image_path = os.path.join(outdir, f'unconditional_{i:06d}.npz')
+                image_path = os.path.join(outdir, f'unconditional_{i}.npz')
+                np.savez_compressed(image_path, images=images_np)
                 #np.savez_compressed('training_data/uncond_samples_batch' + str(cur_batch) + '.npz', images=images_np)
             else:
-                image_path = os.path.join(outdir, f'conditional_{i:06d}.npz')
+                image_path = os.path.join(outdir, f'conditional_{i}.npz')
                 #np.savez_compressed('training_data/cond_samples_batch' + str(cur_batch) + '.npz', images=images_np,
                 #                    labels=class_labels.cpu().numpy())
-            
-            np.savez_compressed(image_path, images=images_np)
+                np.savez_compressed(image_path, images=images_np, labels=class_labels.cpu().numpy())
 
 
 #----------------------------------------------------------------------------
