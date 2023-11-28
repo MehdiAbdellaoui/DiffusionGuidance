@@ -1,6 +1,8 @@
 from .unet import EncoderUNetModel
 
 NUM_CLASSES = 1000
+
+
 def create_classifier(
     image_size,
     classifier_in_channels,

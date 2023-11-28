@@ -174,7 +174,7 @@ def edm_sampler(
 @click.option('--time_max', help='End time for applying the discriminator', metavar='FLOAT', type=click.FloatRange(0, 1), default=1, show_default=True)
 
 # Adaptive strategy is only applied to conditional generation as indicated in Table 8 page 21
-@click.option('--adaptive_weight',   help='Enable adaptive strategy to boost the DG weights?', metavar='INT', type=click.IntRange(min=0, max=1), default=1)
+@click.option('--adaptive_weight',   help='Enable adaptive strategy to boost the DG weights?', metavar='INT', type=click.IntRange(min=0, max=1), default=0)
 
 def main(w_dg_1, w_dg_2, discriminator_checkpoint, conditional, seed, num_samples, save_format, time_mid, time_max, adaptive_weight, network_pkl, outdir, class_idx, max_batch_size, device, **sampler_kwargs):
     # Set manual seed for reproducibility

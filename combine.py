@@ -34,8 +34,8 @@ if __name__ == '__main__':
     if combine is True:
         # Combine into 5 batches with 10000 images and labels in each batch
         num_files = 500
-        file_names = ['training_data/conditional_' + str(i) for i in range(num_files)]
-        save_name = 'training_data/cond_disc_249pt_'
+        file_names = ['training_data/unconditional_' + str(i) for i in range(num_files)]
+        save_name = 'training_data/uncond_disc_59pt_test_'
         combine_npz(file_names, 1, save_name, False)
     else:
         # Check such that the combined batches are not duplicates

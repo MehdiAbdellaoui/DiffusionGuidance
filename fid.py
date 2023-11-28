@@ -33,9 +33,6 @@ def calculate_inception_stats_npz(image_path, num_samples=50000, samples_per_bat
 
     # Load and shuffle images
     files = np.load(image_path)['images']
-    #random_shuffle = np.random.permutation(files.shape[0])
-    #files = files[random_shuffle, :, :, :]
-    print(files.shape)
     count = 0
     num_batch_images = samples_per_batch
     num_batches = int(num_samples / num_batch_images)
@@ -85,7 +82,7 @@ def main(image_path, ref_path, num_samples, samples_per_batch, device):
         ref = dict(np.load(f))
     mu, sigma = calculate_inception_stats_npz(image_path=image_path, num_samples=num_samples,
                                               samples_per_batch=samples_per_batch, device=device)
-    #np.savez_compressed('training_data/CIFAR_ref/cifar10-32x32-10K.npz', mu=mu, sigma=sigma)
+
     print('Calculating FID...')
     fid = calculate_fid_from_inception_stats(mu, sigma, ref['mu'], ref['sigma'])
     print(f'{image_path.split("/")[-1]}, {fid:g}')
