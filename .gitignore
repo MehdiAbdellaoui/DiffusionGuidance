@@ -13,6 +13,8 @@ __pycache__/
 *.pt
 *.npz
 *.pkl
+cond_disc/
+uncond_disc/
 
 # Distribution / packaging
 .Python

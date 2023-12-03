@@ -14,6 +14,8 @@ import numpy as np
 import scipy.linalg
 import torch
 import dnnlib
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 #----------------------------------------------------------------------------
 
@@ -75,17 +77,47 @@ def calculate_fid_from_inception_stats(mu, sigma, mu_ref, sigma_ref):
 @click.option('--num_samples', metavar='INT', default=50000)
 @click.option('--samples_per_batch', metavar='INT', default=100)
 @click.option('--device', metavar='STR', default='cuda')
-def main(image_path, ref_path, num_samples, samples_per_batch, device):
+@click.option('--plot', help='Plot FID VS training epochs', default=False)
+def main(image_path, ref_path, num_samples, samples_per_batch, device, plot):
     """Calculate FID for a given set of images."""
+
     print(f'Loading dataset reference statistics from "{ref_path}"...')
     with dnnlib.util.open_url(ref_path) as f:
         ref = dict(np.load(f))
-    mu, sigma = calculate_inception_stats_npz(image_path=image_path, num_samples=num_samples,
-                                              samples_per_batch=samples_per_batch, device=device)
 
-    print('Calculating FID...')
-    fid = calculate_fid_from_inception_stats(mu, sigma, ref['mu'], ref['sigma'])
-    print(f'{image_path.split("/")[-1]}, {fid:g}')
+    if plot: 
+        epochs = list(range(10)) + list(range(10, 60, 5))
+        fids = []
+        for epoch in epochs: 
+            image = f'{image_path}uncond_disc_{epoch}pt.npz'
+            mu, sigma = calculate_inception_stats_npz(image_path=image, num_samples=num_samples,
+                                                    samples_per_batch=samples_per_batch, device=device)
+            fids.append(calculate_fid_from_inception_stats(mu, sigma, ref['mu'], ref['sigma']))
+
+        plt.figure(figsize=(10, 6))
+        sns.set_theme()
+
+        sns.lineplot(x=epochs, y=fids, markers='o')
+        plt.title("FID vs Discriminator Training Epochs")
+        plt.xlabel('Epochs')
+        plt.ylabel('FID')
+        plt.grid(True)
+
+        plots_folder = 'plots'
+        os.makedirs(plots_folder, exist_ok=True)
+
+        plot_filename = os.path.join(plots_folder, 'fid_vs_epochs_plot.png')
+        plt.savefig(plot_filename)
+
+        plt.show()
+        
+    else: 
+        mu, sigma = calculate_inception_stats_npz(image_path=image_path, num_samples=num_samples,
+                                                samples_per_batch=samples_per_batch, device=device)
+
+        print('Calculating FID...')
+        fid = calculate_fid_from_inception_stats(mu, sigma, ref['mu'], ref['sigma'])
+        print(f'{image_path.split("/")[-1]}, {fid:g}')
 
 
 #----------------------------------------------------------------------------
