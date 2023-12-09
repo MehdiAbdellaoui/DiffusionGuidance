@@ -11,7 +11,8 @@ def create_classifier(
     classifier_depth,
     classifier_attention_resolutions,
     classifier_pool,
-    conditioned=False
+    conditioned=False,
+    lora_rank=-1
 ):
 
     if conditioned:
@@ -51,5 +52,6 @@ def create_classifier(
         use_fp16=False,
         num_head_channels=64,
         use_scale_shift_norm=True,
-        resblock_updown=True
+        resblock_updown=True,
+        lora_rank=lora_rank
     )

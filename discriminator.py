@@ -33,7 +33,7 @@ def load_discriminator(ckpt, device, grads=True, conditioned=True):
 
 
 # Create the ADM model as explained in the paper and the given ADM checkpoint
-def get_ADM_model():
+def get_ADM_model(lora_rank=-1):
     adm_classifier = create_classifier(
         image_size=32,
         classifier_in_channels=3,
@@ -42,10 +42,11 @@ def get_ADM_model():
         classifier_depth=4,
         classifier_attention_resolutions="32,16,8",
         classifier_pool='attention',
-        conditioned=False
+        conditioned=False,
+        lora_rank=lora_rank
     )
     pretrained_adm = torch.load('guided_diffusion/model/32x32_classifier.pt')
-    adm_classifier.load_state_dict(pretrained_adm)
+    adm_classifier.load_state_dict(pretrained_adm, strict=False)
     return adm_classifier
 
 

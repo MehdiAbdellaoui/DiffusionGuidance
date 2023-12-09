@@ -8,6 +8,7 @@ from discriminator import get_discriminator_model, get_ADM_model, WVEtoLVP, load
 from keras.datasets import cifar10
 import dnnlib
 
+import loralib as lora
 
 class CustomDataset(data.Dataset):
     def __init__(self, data, labels, cond=None, transform=transforms.ToTensor()):
@@ -35,6 +36,7 @@ class CustomDataset(data.Dataset):
 @click.option('--n_epochs',                    help='Num epochs',             metavar='INT',     type=click.IntRange(min=1),  default=60)
 @click.option('--lr',                          help='Learning rate',          metavar='FLOAT',   type=click.FloatRange(min=0),default=3e-4)
 @click.option('--wd',                          help='Weight decay',           metavar='FLOAT',   type=click.FloatRange(min=0),default=1e-7)
+@click.option('--lora_rank',                   help='Lora Rank',              metavar='INT',     type=click.IntRange(min=-1),  default=-1)
 def main(**kwargs):
     # Load the arguments
     opts = dnnlib.EasyDict(kwargs)
@@ -62,7 +64,10 @@ def main(**kwargs):
     loss_fun = torch.nn.BCELoss()
     # Used to scale input values between -1 and 1, source of nasty bug
     scaler = lambda x: 2. * x - 1
-    adm_feature_extraction = get_ADM_model().to(device)
+    
+    adm_feature_extraction = get_ADM_model(lora_rank=lora_rank).to(device)
+    lora.mark_only_lora_as_trainable(adm_feature_extraction)
+
     discriminator = get_discriminator_model(opts.cond).to(device)
     optimizer = torch.optim.Adam(discriminator.parameters(), lr=opts.lr, weight_decay=opts.wd)
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=opts.batch_size, shuffle=True)
@@ -99,9 +104,12 @@ def main(**kwargs):
             e = torch.randn_like(image)
             # Apply noise by expanding the mean and std values to fit with the image and noise
             noisy_images = mean[:, None, None, None] * image + std[:, None, None, None] * e
-
-            with torch.no_grad():
+            
+            if lora_rank != -1:
                 features = adm_feature_extraction(noisy_images, t, cond, features=True, sigmoid=False)
+            else:
+                with torch.no_grad():
+                    features = adm_feature_extraction(noisy_images, t, cond, features=True, sigmoid=False)
             discriminator_output = discriminator(features, t, cond, features=False, sigmoid=True)[:, 0]
 
             loss = loss_fun(discriminator_output, labels)
@@ -116,12 +124,14 @@ def main(**kwargs):
                 print('                                                                                    ', end='\r')
                 print(f'Epoch {i}: Loss: {np.mean(batch_loss)}, Accuracy: {np.mean(batch_accuracy)}', end='\r')
         # Save every epoch if anything happens
-        torch.save(discriminator.state_dict(), opts.save_dir + f"discrim_uncond_epoch{i}.pt")
         print(f'Epoch {i}: Loss: {np.mean(batch_loss)}, Accuracy: {np.mean(batch_accuracy)}')
         # For plotting the training
         plot_loss.append(np.mean(batch_loss))
         plot_accuracy.append(np.mean(batch_accuracy))
         plot_epochs.append(i)
+    
+    torch.save(lora.lora_state_dict(adm_feature_extraction), opts.save_dir + f"lora_adm_final.pt")
+    torch.save(discriminator.state_dict(), opts.save_dir + f"discrim_uncond_final.pt")
 
     # Plotting training stats
     fig, ax1 = plt.subplots()

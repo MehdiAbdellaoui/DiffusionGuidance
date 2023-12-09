@@ -8,6 +8,8 @@ import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
 
+import loralib as lora
+
 from .fp16_util import convert_module_to_f16, convert_module_to_f32
 from .nn import (
     checkpoint,
@@ -170,6 +172,7 @@ class ResBlock(TimestepBlock):
         use_checkpoint=False,
         up=False,
         down=False,
+        lora_rank=-1
     ):
         super().__init__()
         self.channels = channels
@@ -179,11 +182,15 @@ class ResBlock(TimestepBlock):
         self.use_conv = use_conv
         self.use_checkpoint = use_checkpoint
         self.use_scale_shift_norm = use_scale_shift_norm
+        self.lora_rank = lora_rank
 
+        if lora_rank!=-1: 
+            self.lora_conv = lora.Conv2d(channels, self.out_channels, 3, padding=1, r=lora_rank)
+        
         self.in_layers = nn.Sequential(
             normalization(channels),
             nn.SiLU(),
-            conv_nd(dims, channels, self.out_channels, 3, padding=1),
+            conv_nd(dims, channels, self.out_channels, 3, padding=1) 
         )
 
         self.updown = up or down
@@ -237,12 +244,16 @@ class ResBlock(TimestepBlock):
     def _forward(self, x, emb):
         if self.updown:
             in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
-            h = in_rest(x)
-            h = self.h_upd(h)
+            a = in_rest(x)
+            b = self.h_upd(a)
             x = self.x_upd(x)
-            h = in_conv(h)
+            h = in_conv(b)
         else:
-            h = self.in_layers(x)
+            in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
+            a = in_rest(x)
+            h = self.in_conv(a)
+        if lora_rank != -1:
+            h += self.lora_conv(a)
         emb_out = self.emb_layers(emb).type(h.dtype)
         while len(emb_out.shape) < len(h.shape):
             emb_out = emb_out[..., None]
@@ -709,7 +720,8 @@ class EncoderUNetModel(nn.Module):
         use_scale_shift_norm=False,
         resblock_updown=False,
         use_new_attention_order=False,
-        pool="adaptive"
+        pool="adaptive",
+        lora_rank=-1
     ):
         super().__init__()
 
@@ -758,6 +770,7 @@ class EncoderUNetModel(nn.Module):
                         dims=dims,
                         use_checkpoint=use_checkpoint,
                         use_scale_shift_norm=use_scale_shift_norm,
+                        lora_rank=lora_rank
                     )
                 ]
                 ch = int(mult * model_channels)
@@ -787,6 +800,7 @@ class EncoderUNetModel(nn.Module):
                             use_checkpoint=use_checkpoint,
                             use_scale_shift_norm=use_scale_shift_norm,
                             down=True,
+                            lora_rank=lora_rank
                         )
                         if resblock_updown
                         else Downsample(
@@ -807,6 +821,7 @@ class EncoderUNetModel(nn.Module):
                 dims=dims,
                 use_checkpoint=use_checkpoint,
                 use_scale_shift_norm=use_scale_shift_norm,
+                lora_rank=lora_rank
             ),
             AttentionBlock(
                 ch,
@@ -822,6 +837,7 @@ class EncoderUNetModel(nn.Module):
                 dims=dims,
                 use_checkpoint=use_checkpoint,
                 use_scale_shift_norm=use_scale_shift_norm,
+                lora_rank=lora_rank
             ),
         )
         self._feature_size += ch
