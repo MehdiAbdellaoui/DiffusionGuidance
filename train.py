@@ -9,6 +9,7 @@ from keras.datasets import cifar10
 import dnnlib
 
 import loralib as lora
+import sys
 
 class CustomDataset(data.Dataset):
     def __init__(self, data, labels, cond=None, transform=transforms.ToTensor()):
@@ -65,7 +66,7 @@ def main(**kwargs):
     # Used to scale input values between -1 and 1, source of nasty bug
     scaler = lambda x: 2. * x - 1
     
-    adm_feature_extraction = get_ADM_model(lora_rank=lora_rank).to(device)
+    adm_feature_extraction = get_ADM_model(lora_rank=opts.lora_rank).to(device)
     lora.mark_only_lora_as_trainable(adm_feature_extraction)
 
     discriminator = get_discriminator_model(opts.cond).to(device)
@@ -77,6 +78,21 @@ def main(**kwargs):
     plot_accuracy = []
     plot_loss = []
     plot_epochs = []
+    
+    '''
+    for name, param in adm_feature_extraction.named_parameters():
+        if 'lora_' in name:
+            param.requires_grad = True 
+        else:
+            param.requires_grad = False
+
+    for name, param in adm_feature_extraction.named_parameters():
+        if param.requires_grad:
+            print(name)
+    '''
+    
+    #sys.exit(0)
+
     for i in range(opts.n_epochs):
         batch_loss = []
         batch_accuracy = []
@@ -105,7 +121,7 @@ def main(**kwargs):
             # Apply noise by expanding the mean and std values to fit with the image and noise
             noisy_images = mean[:, None, None, None] * image + std[:, None, None, None] * e
             
-            if lora_rank != -1:
+            if opts.lora_rank != -1:
                 features = adm_feature_extraction(noisy_images, t, cond, features=True, sigmoid=False)
             else:
                 with torch.no_grad():

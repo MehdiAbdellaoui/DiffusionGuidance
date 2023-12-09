@@ -237,9 +237,13 @@ class ResBlock(TimestepBlock):
         :param emb: an [N x emb_channels] Tensor of timestep embeddings.
         :return: an [N x C x ...] Tensor of outputs.
         """
-        return checkpoint(
-            self._forward, (x, emb), self.parameters(), self.use_checkpoint
-        )
+        
+        if self.use_checkpoint:
+            return checkpoint(
+                self._forward, (x, emb), self.parameters(), self.use_checkpoint
+            )
+        else:
+            return self._forward(x, emb) 
 
     def _forward(self, x, emb):
         if self.updown:
@@ -248,12 +252,14 @@ class ResBlock(TimestepBlock):
             b = self.h_upd(a)
             x = self.x_upd(x)
             h = in_conv(b)
+            if self.lora_rank != -1:
+                h += self.lora_conv(b)
         else:
             in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
             a = in_rest(x)
-            h = self.in_conv(a)
-        if lora_rank != -1:
-            h += self.lora_conv(a)
+            h = in_conv(a)
+            if self.lora_rank != -1:
+                h += self.lora_conv(a)
         emb_out = self.emb_layers(emb).type(h.dtype)
         while len(emb_out.shape) < len(h.shape):
             emb_out = emb_out[..., None]
@@ -306,7 +312,10 @@ class AttentionBlock(nn.Module):
         self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
 
     def forward(self, x):
-        return checkpoint(self._forward, (x,), self.parameters(), True)
+        if self.use_checkpoint:
+            return checkpoint(self._forward, (x,), self.parameters(), True)
+        else:
+            return self._forward(x)
 
     def _forward(self, x):
         b, c, *spatial = x.shape
@@ -462,6 +471,11 @@ class UNetModel(nn.Module):
 
         if num_heads_upsample == -1:
             num_heads_upsample = num_heads
+        
+        if lora_rank == -1:
+            self.use_checkpoint = True
+        else:
+            self.use_checkpoint = False 
 
         self.image_size = image_size
         self.in_channels = in_channels
@@ -473,7 +487,6 @@ class UNetModel(nn.Module):
         self.channel_mult = channel_mult
         self.conv_resample = conv_resample
         self.num_classes = num_classes
-        self.use_checkpoint = use_checkpoint
         self.dtype = th.float16 if use_fp16 else th.float32
         self.num_heads = num_heads
         self.num_head_channels = num_head_channels
@@ -727,6 +740,11 @@ class EncoderUNetModel(nn.Module):
 
         if num_heads_upsample == -1:
             num_heads_upsample = num_heads
+        
+        if lora_rank == -1:
+            self.use_checkpoint = True
+        else:
+            self.use_checkpoint = False 
 
         self.in_channels = in_channels
         self.model_channels = model_channels
@@ -736,7 +754,6 @@ class EncoderUNetModel(nn.Module):
         self.dropout = dropout
         self.channel_mult = channel_mult
         self.conv_resample = conv_resample
-        self.use_checkpoint = use_checkpoint
         self.dtype = th.float16 if use_fp16 else th.float32
         self.num_heads = num_heads
         self.num_head_channels = num_head_channels

@@ -138,7 +138,6 @@ def checkpoint(func, inputs, params, flag):
     else:
         return func(*inputs)
 
-
 class CheckpointFunction(th.autograd.Function):
     @staticmethod
     def forward(ctx, run_function, length, *args):
@@ -168,3 +167,7 @@ class CheckpointFunction(th.autograd.Function):
         del ctx.input_params
         del output_tensors
         return (None, None) + input_grads
+
+
+
+
