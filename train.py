@@ -66,10 +66,14 @@ def main(**kwargs):
     scaler = lambda x: 2. * x - 1
     
     adm_feature_extraction = get_ADM_model(lora_rank=opts.lora_rank).to(device)
-    lora.mark_only_lora_as_trainable(adm_feature_extraction)
-
     discriminator = get_discriminator_model(opts.cond).to(device)
-    optimizer = torch.optim.Adam(discriminator.parameters(), lr=opts.lr, weight_decay=opts.wd)
+
+    if opts.lora_rank != -1:
+        lora.mark_only_lora_as_trainable(adm_feature_extraction)
+        combined_params = list(adm_feature_extraction.parameters()) + list(discriminator.parameters())
+        optimizer = torch.optim.Adam(combined_params, lr=opts.lr, weight_decay=opts.wd)
+    else:
+        optimizer = torch.optim.Adam(discriminator.parameters(), lr=opts.lr, weight_decay=opts.wd)
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=opts.batch_size, shuffle=True)
 
     importance_sampling = WVEtoLVP()
