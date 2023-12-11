@@ -4,7 +4,7 @@ import math
 import numpy as np
 
 
-def load_discriminator(ckpt, device, grads=True, conditioned=True):
+def load_discriminator(ckpt, device, grads=True, conditioned=True, lora=None, lora_rank=128):
     """
     Examples:
         evaluate = load_discriminator('models/discriminator_epoch99.pt', device, conditioned=True)
@@ -15,12 +15,17 @@ def load_discriminator(ckpt, device, grads=True, conditioned=True):
         device: Choose to load model to CPU or GPU
         grads: Choose whether torch grads should be active during evaluation
         conditioned: Whether the checkpoint loads a conditioned model or not
+        lora: Path to lora weights
+        lora_rank: rank of pretrained lora model
 
     Returns: A discriminator evaluation function
 
     """
     # Load the complete discriminator and return the evaluation function
-    adm_model = get_ADM_model().to(device)
+    if lora is not None:
+        adm_model = get_ADM_model(lora_rank=lora_rank, pre_trained_lora=lora).to(device)
+    else:
+        adm_model = get_ADM_model().to(device)
     discriminator = get_discriminator_model(conditioned, ckpt).to(device)
 
     def evaluate(x, t, cond=None):
@@ -33,7 +38,7 @@ def load_discriminator(ckpt, device, grads=True, conditioned=True):
 
 
 # Create the ADM model as explained in the paper and the given ADM checkpoint
-def get_ADM_model(lora_rank=-1):
+def get_ADM_model(lora_rank=-1, pre_trained_lora=None):
     adm_classifier = create_classifier(
         image_size=32,
         classifier_in_channels=3,
@@ -46,7 +51,22 @@ def get_ADM_model(lora_rank=-1):
         lora_rank=lora_rank
     )
     pretrained_adm = torch.load('guided_diffusion/model/32x32_classifier.pt')
-    adm_classifier.load_state_dict(pretrained_adm, strict=False)
+    if lora_rank != -1:
+        new_state_dict = {}
+        for key in pretrained_adm.keys():
+            new_key = key
+            # Example of renaming logic (adjust according to your needs)
+            if 'in_layers.2.weight' in key:
+                new_key = key.replace('in_layers.2.weight', 'in_layers.2.conv.weight')
+            elif 'in_layers.2.bias' in key:
+                new_key = key.replace('in_layers.2.bias', 'in_layers.2.conv.bias')
+            new_state_dict[new_key] = pretrained_adm[key]
+        adm_classifier.load_state_dict(new_state_dict, strict=False)
+        if pre_trained_lora is not None:
+            lora_weights = torch.load(pre_trained_lora)
+            adm_classifier.load_state_dict(lora_weights, strict=False)
+    else:
+        adm_classifier.load_state_dict(pretrained_adm, strict=True)
     return adm_classifier
 
 

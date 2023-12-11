@@ -18,6 +18,7 @@ import torch
 import PIL.Image
 import dnnlib
 from torch_utils import distributed as dist
+from combine import combine_npz
 
 import random
 import math
@@ -26,11 +27,12 @@ import discriminator as discriminator_lib
 #----------------------------------------------------------------------------
 # Proposed EDM-G++ sampler 
 
+
 def edm_sampler(
     discriminator, w_dg_1, w_dg_2, time_mid, time_max, adaptive_weight, vpsde,
     net, latents, class_labels=None, randn_like=torch.randn_like,
     num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
-    S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
+    S_churn=0, S_churn_manual=4, S_min=0, S_max=float('inf'), S_noise=1,
 ):
     # Adjust noise levels based on what's supported by the network.
     sigma_min = max(sigma_min, net.sigma_min)
@@ -41,7 +43,6 @@ def edm_sampler(
     t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
     t_steps = torch.cat([net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]) # t_N = 0
 
-    S_churn_manual = 4
     period_weight = 2 # for every odd denoising steps (page 22 of paper)
     period_churn = 2 # 5 in their implementation? for every odd denoising steps (page 22 of paper)
 
@@ -66,11 +67,10 @@ def edm_sampler(
             if i % period_churn == 0: # consider start at step 1
                 # for such samples with density-ratio less than 0 (page 22 of paper)
                 S_churn_vector[log_ratio < 0.] = S_churn_manual
-
         # Increase noise temporarily.
         # adapted due to vectorized version of S_churn
         gamma = torch.minimum(S_churn_vector / num_steps, S_churn_vector_max) if S_min <= t_cur <= S_max else torch.zeros_like(S_churn_vector)
-        
+
         # sigma(t) = t from EDM paper
         t_hat = net.round_sigma(t_cur + gamma * t_cur) 
         
@@ -140,6 +140,7 @@ def edm_sampler(
 @click.option('--sigma_max',               help='Highest noise level  [default: varies]', metavar='FLOAT',          type=click.FloatRange(min=0, min_open=True))
 @click.option('--rho',                     help='Time step exponent', metavar='FLOAT',                              type=click.FloatRange(min=0, min_open=True), default=7, show_default=True)
 @click.option('--S_churn', 'S_churn',      help='Stochasticity strength', metavar='FLOAT',                          type=click.FloatRange(min=0), default=0, show_default=True)
+@click.option('--S_churn_manual', 'S_churn_manual',      help='Stochasticity strength for adaptive weight', metavar='FLOAT',            type=click.FloatRange(min=0), default=4, show_default=True)
 @click.option('--S_min', 'S_min',          help='Stoch. min noise level', metavar='FLOAT',                          type=click.FloatRange(min=0), default=0, show_default=True)
 @click.option('--S_max', 'S_max',          help='Stoch. max noise level', metavar='FLOAT',                          type=click.FloatRange(min=0), default='inf', show_default=True)
 @click.option('--S_noise', 'S_noise',      help='Stoch. noise inflation', metavar='FLOAT',                          type=float, default=1, show_default=True)
@@ -160,6 +161,7 @@ def edm_sampler(
 
 # Discriminator checkpoint and architecture
 @click.option('--discriminator_checkpoint',   help='Path to discriminator checkpoint', metavar='STR',                       type=str, default='', show_default=True)
+@click.option('--lora_checkpoint',   help='Path to discriminator checkpoint', metavar='STR',                       type=str, default=None, show_default=True)
 @click.option('--conditional',   help='Conditional discriminator?', metavar='INT', type=click.IntRange(min=0, max=1), default=0)
 
 # Sampling configuration
@@ -176,7 +178,7 @@ def edm_sampler(
 # Adaptive strategy is only applied to conditional generation as indicated in Table 8 page 21
 @click.option('--adaptive_weight',   help='Enable adaptive strategy to boost the DG weights?', metavar='INT', type=click.IntRange(min=0, max=1), default=0)
 
-def main(w_dg_1, w_dg_2, discriminator_checkpoint, conditional, seed, num_samples, save_format, time_mid, time_max, adaptive_weight, network_pkl, outdir, class_idx, max_batch_size, device, **sampler_kwargs):
+def main(w_dg_1, w_dg_2, discriminator_checkpoint, lora_checkpoint, conditional, seed, num_samples, save_format, time_mid, time_max, adaptive_weight, network_pkl, outdir, class_idx, max_batch_size, device, **sampler_kwargs):
     # Set manual seed for reproducibility
     random.seed(seed)
     np.random.seed(seed)
@@ -197,7 +199,7 @@ def main(w_dg_1, w_dg_2, discriminator_checkpoint, conditional, seed, num_sample
     # Load pretained discriminator network.
     if w_dg_1 != 0 or w_dg_2 != 0:
         print(f'Loading discriminator from "{discriminator_checkpoint}"...')
-        discriminator = discriminator_lib.load_discriminator(discriminator_checkpoint, device, conditioned=(net.label_dim and conditional)) 
+        discriminator = discriminator_lib.load_discriminator(discriminator_checkpoint, device, conditioned=(net.label_dim and conditional), lora=lora_checkpoint)
     else:
         discriminator = None
     
@@ -237,19 +239,30 @@ def main(w_dg_1, w_dg_2, discriminator_checkpoint, conditional, seed, num_sample
                 PIL.Image.fromarray(image_np, 'RGB').save(image_path)
         elif save_format == 'npz':
             if class_labels is None:
-                image_path = os.path.join(outdir, f'unconditional_{i}.npz')
+                image_path = os.path.join('training_data/uncombined_samples/', f'samples_{i}.npz')
                 np.savez_compressed(image_path, images=images_np)
                 #np.savez_compressed('training_data/uncond_samples_batch' + str(cur_batch) + '.npz', images=images_np)
             else:
-                image_path = os.path.join(outdir, f'conditional_{i}.npz')
+                image_path = os.path.join('training_data/uncombined_samples/', f'samples_{i}.npz')
                 #np.savez_compressed('training_data/cond_samples_batch' + str(cur_batch) + '.npz', images=images_np,
                 #                    labels=class_labels.cpu().numpy())
                 np.savez_compressed(image_path, images=images_np, labels=class_labels.cpu().numpy())
 
+    # Combine all files
+    if save_format == 'npz':
+        if conditional:
+            file_names = ['training_data/uncombined_samples/samples_' + str(i) for i in range(num_batches)]
+        else:
+            file_names = ['training_data/uncombined_samples/samples_' + str(i) for i in range(num_batches)]
+        image_path = os.path.join(outdir, 'samples.npz')
+        combine_npz(file_names, image_path, conditional)
+
 
 #----------------------------------------------------------------------------
 
+
 if __name__ == "__main__":
     main()
+
 
 #----------------------------------------------------------------------------

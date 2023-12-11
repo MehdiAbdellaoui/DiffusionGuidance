@@ -51,7 +51,7 @@ def calculate_inception_stats_npz(image_path, num_samples=50000, samples_per_bat
         count = count + remaining_num_samples
         # Scuffed way of writing to the same line
         print('                               ', end='\r')
-        print(f'Progress: {i / num_batches}%', end='\r')
+        print(f'Progress: {i / num_batches * 100}%', end='\r')
         if count >= num_samples:
             break
     print('                               ')

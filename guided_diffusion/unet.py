@@ -184,14 +184,18 @@ class ResBlock(TimestepBlock):
         self.use_scale_shift_norm = use_scale_shift_norm
         self.lora_rank = lora_rank
 
-        if lora_rank!=-1: 
-            self.lora_conv = lora.Conv2d(channels, self.out_channels, 3, padding=1, r=lora_rank)
-        
-        self.in_layers = nn.Sequential(
-            normalization(channels),
-            nn.SiLU(),
-            conv_nd(dims, channels, self.out_channels, 3, padding=1) 
-        )
+        if lora_rank != -1:
+            self.in_layers = nn.Sequential(
+                normalization(channels),
+                nn.SiLU(),
+                lora.Conv2d(channels, self.out_channels, 3, padding=1, r=lora_rank)
+            )
+        else:
+            self.in_layers = nn.Sequential(
+                normalization(channels),
+                nn.SiLU(),
+                conv_nd(dims, channels, self.out_channels, 3, padding=1)
+            )
 
         self.updown = up or down
 
@@ -237,29 +241,23 @@ class ResBlock(TimestepBlock):
         :param emb: an [N x emb_channels] Tensor of timestep embeddings.
         :return: an [N x C x ...] Tensor of outputs.
         """
-        
+
         if self.use_checkpoint:
             return checkpoint(
                 self._forward, (x, emb), self.parameters(), self.use_checkpoint
             )
         else:
-            return self._forward(x, emb) 
+            return self._forward(x, emb)
 
     def _forward(self, x, emb):
         if self.updown:
             in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
-            a = in_rest(x)
-            b = self.h_upd(a)
+            h = in_rest(x)
+            h = self.h_upd(h)
             x = self.x_upd(x)
-            h = in_conv(b)
-            if self.lora_rank != -1:
-                h += self.lora_conv(b)
+            h = in_conv(h)
         else:
-            in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
-            a = in_rest(x)
-            h = in_conv(a)
-            if self.lora_rank != -1:
-                h += self.lora_conv(a)
+            h = self.in_layers(x)
         emb_out = self.emb_layers(emb).type(h.dtype)
         while len(emb_out.shape) < len(h.shape):
             emb_out = emb_out[..., None]

@@ -7,9 +7,8 @@ import torchvision.transforms as transforms
 from discriminator import get_discriminator_model, get_ADM_model, WVEtoLVP, load_discriminator
 from keras.datasets import cifar10
 import dnnlib
-
 import loralib as lora
-import sys
+
 
 class CustomDataset(data.Dataset):
     def __init__(self, data, labels, cond=None, transform=transforms.ToTensor()):
@@ -78,20 +77,6 @@ def main(**kwargs):
     plot_accuracy = []
     plot_loss = []
     plot_epochs = []
-    
-    '''
-    for name, param in adm_feature_extraction.named_parameters():
-        if 'lora_' in name:
-            param.requires_grad = True 
-        else:
-            param.requires_grad = False
-
-    for name, param in adm_feature_extraction.named_parameters():
-        if param.requires_grad:
-            print(name)
-    '''
-    
-    #sys.exit(0)
 
     for i in range(opts.n_epochs):
         batch_loss = []
