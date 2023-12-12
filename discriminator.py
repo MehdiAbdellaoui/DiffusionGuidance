@@ -22,7 +22,7 @@ def load_discriminator(ckpt, device, grads=True, conditioned=True, lora=None, lo
 
     """
     # Load the complete discriminator and return the evaluation function
-    if lora is not None:
+    if lora_rank != -1:
         adm_model = get_ADM_model(lora_rank=lora_rank, pre_trained_lora=lora).to(device)
     else:
         adm_model = get_ADM_model().to(device)

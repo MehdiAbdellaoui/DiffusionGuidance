@@ -162,6 +162,7 @@ def edm_sampler(
 # Discriminator checkpoint and architecture
 @click.option('--discriminator_checkpoint',   help='Path to discriminator checkpoint', metavar='STR',                       type=str, default='', show_default=True)
 @click.option('--lora_checkpoint',   help='Path to discriminator checkpoint', metavar='STR',                       type=str, default=None, show_default=True)
+@click.option('--lora_rank',   help='Conditional discriminator?', metavar='INT', type=click.IntRange(min=-1), default=-1)
 @click.option('--conditional',   help='Conditional discriminator?', metavar='INT', type=click.IntRange(min=0, max=1), default=0)
 
 # Sampling configuration
@@ -178,7 +179,7 @@ def edm_sampler(
 # Adaptive strategy is only applied to conditional generation as indicated in Table 8 page 21
 @click.option('--adaptive_weight',   help='Enable adaptive strategy to boost the DG weights?', metavar='INT', type=click.IntRange(min=0, max=1), default=0)
 
-def main(w_dg_1, w_dg_2, discriminator_checkpoint, lora_checkpoint, conditional, seed, num_samples, save_format, time_mid, time_max, adaptive_weight, network_pkl, outdir, class_idx, max_batch_size, device, **sampler_kwargs):
+def main(w_dg_1, w_dg_2, discriminator_checkpoint, lora_checkpoint, lora_rank, conditional, seed, num_samples, save_format, time_mid, time_max, adaptive_weight, network_pkl, outdir, class_idx, max_batch_size, device, **sampler_kwargs):
     # Set manual seed for reproducibility
     random.seed(seed)
     np.random.seed(seed)
@@ -199,7 +200,11 @@ def main(w_dg_1, w_dg_2, discriminator_checkpoint, lora_checkpoint, conditional,
     # Load pretained discriminator network.
     if w_dg_1 != 0 or w_dg_2 != 0:
         print(f'Loading discriminator from "{discriminator_checkpoint}"...')
-        discriminator = discriminator_lib.load_discriminator(discriminator_checkpoint, device, conditioned=(net.label_dim and conditional), lora=lora_checkpoint)
+        if lora_rank != -1:
+            print('Loading LoRA checkpoint')
+        else:
+            print('Loading regular checkpoint')
+        discriminator = discriminator_lib.load_discriminator(discriminator_checkpoint, device, conditioned=(net.label_dim and conditional), lora=lora_checkpoint, lora_rank=lora_rank)
     else:
         discriminator = None
     
