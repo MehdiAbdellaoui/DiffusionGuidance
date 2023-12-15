@@ -12,6 +12,8 @@ In this repository we provide the code for our attempt at reproducing the result
 
 In our [project report](https://github.com/MehdiAbdellaoui/DiffusionGuidance/blob/main/report/DD2412_Project_Report.pdf), we are able to produce very similar FID scores to those presented in the paper for the CIFAR-10 dataset and the EDM-G++ sampling method. In addition, we explore the statistical significance of those results, as well as the sensitivity of the $S_{churn}$ hyperparameter. Lastly, we go beyond the scope of the paper by implementing and analyzing the performance of including the Low-Rank adaptation (LoRA) method for finetuning the discriminator, which we show can improve the FID score for unconditionally generated samples from $1.83$ to $1.79$.
 
+The vast majority of the code in this repository is our work. Some inspiration was taken from the repository of the authors to clarify ambiguities in the instructions of the paper. In the few cases where code was reused, the distinction can be made by looking at the comments in each file.
+
 ## Code execution
 
 ### 1) Create conda environment
@@ -22,7 +24,7 @@ conda create --name <env> --file requirements.txt
 
 ### 2) Get the necessary files
 
-All the necessary files to run the following commands are available in our [public Google Drive](https://drive.google.com/drive/folders/1YwuWQTVLBuTKrx97R_CKimYEyXJm7x9j?usp=sharing)
+All the necessary files to run the following commands are available in our [public Google Drive](https://drive.google.com/drive/folders/1YwuWQTVLBuTKrx97R_CKimYEyXJm7x9j?usp=sharing).
 
 ### 3) Generate fake samples
 
@@ -38,8 +40,8 @@ python generate.py --network https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm
 
 ### 4) Prepare a pre-trained classifier
 
-- Download [models/cond_disc/discrim_cond_epoch.pt](https://drive.google.com/drive/folders/1YwuWQTVLBuTKrx97R_CKimYEyXJm7x9j?usp=sharing)
-- Place **32x32_classifier.pt** at the directory models/cond_disc/discrim_cond_epoch.pt.
+- Download [discrim_cond_epoch59.pt](https://drive.google.com/drive/folders/1YwuWQTVLBuTKrx97R_CKimYEyXJm7x9j?usp=sharing).
+- Place **discrim_cond_epoch59.pt** at the directory models/cond_disc.
 
 ### 5) Train a discriminator
 
