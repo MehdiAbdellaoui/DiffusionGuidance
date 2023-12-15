@@ -4,12 +4,14 @@ https://github.com/hojonathanho/diffusion/blob/1e0dceb3b3495bbe19116a5e1b3596cd0
 
 Docstrings have been added, as well as DDIM sampling and a new collection of beta schedules.
 """
+from discriminator import get_discriminator_model, get_ADM_model, WVEtoLVP, load_discriminator
 
 import enum
 import math
 
 import numpy as np
 import torch as th
+import click
 
 def discretized_gaussian_log_likelihood(x, *, means, log_scales):
     """
@@ -1016,3 +1018,22 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
     while len(res.shape) < len(broadcast_shape):
         res = res[..., None]
     return res.expand(broadcast_shape)
+
+
+#----------------------------------------------------------------------------
+@click.command()
+@click.option('--ckpt', metavar='STR', default='models/uncond_disc/Unconditional discriminator ckpt/discrim_uncond_epoch59.pt')
+@click.option('--device', metavar='STR', default='cuda')
+def main(device):
+    """Calculate NLL loss for the model."""
+    load_discriminator
+    adm_feature_extraction = get_ADM_model().to(device)
+    discriminator = get_discriminator_model(opts.cond).to(device)
+    optimizer = torch.optim.Adam(discriminator.parameters(), lr=opts.lr, weight_decay=opts.wd)
+    data_loader = torch.utils.data.DataLoader(dataset, batch_size=opts.batch_size, shuffle=True)
+    nll = _vb_terms_bpd()
+
+#----------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    main()
