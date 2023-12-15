@@ -37,18 +37,12 @@ With LoRA:
 python generate.py --network https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-cond-vp.pkl --num_samples=50000 --batch 75 --outdir training_data --discriminator_checkpoint models/lora_cond_disc/discrim_cond_final128.pt --conditional 1 --adaptive_weight 1 --w_dg_1 1. --lora_checkpoint models/lora_uncond_disc/cond_adm_final128.pt --lora_rank 128
 ```
 
-### 5) Prepare real data
+### 5) Prepare a pre-trained classifier
 
-```
-
-```
-
-### 6) Prepare a pre-trained classifier
-
-- Download [DG/checkpoints/ADM_classifier/32x32_classifier.pt](https://drive.google.com/drive/folders/1gb68C13-QOt8yA6ZnnS6G5pVIlPO7j_y)
+- Download and place [models/cond_disc/discrim_cond_epoch.pt](https://drive.google.com/drive/folders/1YwuWQTVLBuTKrx97R_CKimYEyXJm7x9j?usp=sharing)
 - Place **32x32_classifier.pt** at the directory specified below.
 
-### 7) Train a discriminator
+### 6) Train a discriminator
 
 ```
 python train.py --sample_dir training_data/conditional_edm_samples/edm_cond_samples.npz --save_dir models/ --cond 1 --lora_rank 128 --batch_size 64
@@ -57,14 +51,14 @@ python train.py --sample_dir training_data/conditional_edm_samples/edm_cond_samp
 ```
 python train.py --sample_dir training_data/unconditional_edm_samples/edm_uncond_samples.npz --save_dir models/ --cond 0 --lora_rank 128 --batch_size 64
 ```
-### 8) Generate discriminator-guided samples
+### 7) Generate discriminator-guided samples
 
 
 
 
-### 9) Evaluate FID
+### 8) Evaluate FID
 
-To generate the FID plot for the unconditional models, use: 
+To generate the FID plot for the unconditional model checkpoints, use: 
 
 ```
 python fid.py --images=./samples --ref=./stats/cifar10-32x32.npz --plot=True --num_samples=10000
