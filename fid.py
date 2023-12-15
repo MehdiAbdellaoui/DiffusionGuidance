@@ -80,26 +80,30 @@ def calculate_fid_from_inception_stats(mu, sigma, mu_ref, sigma_ref):
 @click.option('--plot', help='Plot FID VS training epochs', default=False)
 def main(image_path, ref_path, num_samples, samples_per_batch, device, plot):
     """Calculate FID for a given set of images."""
-
+   
     print(f'Loading dataset reference statistics from "{ref_path}"...')
     with dnnlib.util.open_url(ref_path) as f:
         ref = dict(np.load(f))
 
     if plot: 
-        epochs = list(range(10)) + list(range(10, 60, 5))
+        epochs = [0, 2, 4, 6, 8, 10, 19, 29, 39, 49, 59]
         fids = []
         for epoch in epochs: 
-            image = f'{image_path}uncond_disc_{epoch}pt.npz'
+            print("Epoch :", epoch)
+            image = image_path + '/' + f'epoch{epoch}.npz'
             mu, sigma = calculate_inception_stats_npz(image_path=image, num_samples=num_samples,
                                                     samples_per_batch=samples_per_batch, device=device)
-            fids.append(calculate_fid_from_inception_stats(mu, sigma, ref['mu'], ref['sigma']))
+            print("Calculating FID...")
+            fid = calculate_fid_from_inception_stats(mu, sigma, ref['mu'], ref['sigma'])
+            fids.append(fid)
 
+        print("FIDs : " , fids)
         plt.figure(figsize=(10, 6))
         sns.set_theme()
 
-        sns.lineplot(x=epochs, y=fids, markers='o')
-        plt.title("FID vs Discriminator Training Epochs")
-        plt.xlabel('Epochs')
+        ax = sns.lineplot(x=epochs, y=fids, marker='o', color='green')
+        ax.lines[0].set_linestyle("--")
+        plt.xlabel('Discriminator Training Epochs')
         plt.ylabel('FID')
         plt.grid(True)
 
