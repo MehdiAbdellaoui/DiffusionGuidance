@@ -23,9 +23,8 @@ conda create --name <env> --file requirements.txt
 ### 2) Get the necessary files
 
 All the necessary files to run the following commands are available in our [public Google Drive](https://drive.google.com/drive/folders/1YwuWQTVLBuTKrx97R_CKimYEyXJm7x9j?usp=sharing)
-### 3) Prepare a pre-trained score network
 
-### 4) Generate fake samples
+### 3) Generate fake samples
 
 ```
 python generate.py --network https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-uncond-vp.pkl --num_samples=10000 --batch 100 --outdir training_data --discriminator_checkpoint models/uncond_disc/discrim_uncond_epoch59.pt --conditional 0 --adaptive_weight 0 --w_dg_1 0.
@@ -37,12 +36,12 @@ With LoRA:
 python generate.py --network https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-cond-vp.pkl --num_samples=50000 --batch 75 --outdir training_data --discriminator_checkpoint models/lora_cond_disc/discrim_cond_final128.pt --conditional 1 --adaptive_weight 1 --w_dg_1 1. --lora_checkpoint models/lora_uncond_disc/cond_adm_final128.pt --lora_rank 128
 ```
 
-### 5) Prepare a pre-trained classifier
+### 4) Prepare a pre-trained classifier
 
-- Download and place [models/cond_disc/discrim_cond_epoch.pt](https://drive.google.com/drive/folders/1YwuWQTVLBuTKrx97R_CKimYEyXJm7x9j?usp=sharing)
-- Place **32x32_classifier.pt** at the directory specified below.
+- Download [models/cond_disc/discrim_cond_epoch.pt](https://drive.google.com/drive/folders/1YwuWQTVLBuTKrx97R_CKimYEyXJm7x9j?usp=sharing)
+- Place **32x32_classifier.pt** at the directory models/cond_disc/discrim_cond_epoch.pt.
 
-### 6) Train a discriminator
+### 5) Train a discriminator
 
 ```
 python train.py --sample_dir training_data/conditional_edm_samples/edm_cond_samples.npz --save_dir models/ --cond 1 --lora_rank 128 --batch_size 64
@@ -51,12 +50,25 @@ python train.py --sample_dir training_data/conditional_edm_samples/edm_cond_samp
 ```
 python train.py --sample_dir training_data/unconditional_edm_samples/edm_uncond_samples.npz --save_dir models/ --cond 0 --lora_rank 128 --batch_size 64
 ```
-### 7) Generate discriminator-guided samples
+### 6) Generate discriminator-guided samples
+ 
+```
+python generate.py --network https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-cond-vp.pkl --num_samples=50000 --batch 75 --outdir training_data --discriminator_checkpoint models/lora_cond_disc/discrim_cond_final128.pt --conditional 1 --adaptive_weight 1 --w_dg_1 1. --lora_checkpoint models/lora_uncond_disc/cond_adm_final128.pt --lora_rank 128
+```
+```
+python generate.py --network https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-uncond-vp.pkl --num_samples=50000 --batch 75 --outdir training_data --discriminator_checkpoint models/lora_uncond_disc/discrim_uncond_final16.pt --conditional 0 --adaptive_weight 0 --w_dg_1 2. --lora_checkpoint models/lora_uncond_disc/lora_adm_final16.pt --lora_rank 16
+```
 
+With LoRA: 
 
+```
+python generate.py --network https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-uncond-vp.pkl --num_samples=10000 --batch 100 --outdir training_data --discriminator_checkpoint models/uncond_disc/discrim_uncond_epoch59.pt --conditional 0 --adaptive_weight 0 --w_dg_1 2.
+```
+```
+python generate.py --network https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-uncond-vp.pkl --num_samples=50000 --batch 100 --outdir training_data --discriminator_checkpoint models/cond_disc/discrim_cond_epoch249.pt --conditional 1 --adaptive_weight 1 --w_dg_1 1.
+```
 
-
-### 8) Evaluate FID
+### 7) Evaluate FID
 
 To generate the FID plot for the unconditional model checkpoints, use: 
 
@@ -68,6 +80,27 @@ python fid.py --images=./samples --ref=./stats/cifar10-32x32.npz --plot=True --n
 ## Experimental Results
 
 ### EDM-G++
+
+| Model | Unconditional | Conditional |
+|--------------------------------------------------|--------------------------------------------|------------------------------------------|
+|                                                  | NLL $\downarrow$                  | FID-50k $\downarrow$            | FID-50k $\downarrow$ |
+| EDM (random seed)                                | 2.60                                       | 2.03                                     | 1.82                          |
+| EDM (manual seed)                                | 2.60                                       | 1.97                                     | 1.79                          |
+| EDM-G++ (random seed)                            | 2.55                                       | 1.77                                     | 1.64                          |
+| EDM (ours)                                       | 3.53                                       | 1.96                                     | 1.85                          |
+| EDM-G++ (ours)                                   | 3.29                                       | 1.83                                     | 1.66                          |
+
+### EDM-G++ with LoRA
+
+| Model  |                    | Unconditional  | Conditional |
+|--------------------------------------------------|--------------------|--------------------------------------------|------------------------------------------|
+|                                                  | LoRA rank | FID-50k $\downarrow$              | FID-50k $\downarrow$            |
+| EDM                                              | N/A                | 1.96                                       | 1.85                                     |
+| EDM-G++                                          | N/A                | 1.83                                       | 1.66                                     |
+| LoRA EDM-G++                                     | 16                 | 1.83                                       | 1.65                                     |
+| LoRA EDM-G++                                     | 128                | 1.79                                       | 1.68                                     |
+
+
 
 ### Samples from unconditional Cifar-10 EDM 
 
