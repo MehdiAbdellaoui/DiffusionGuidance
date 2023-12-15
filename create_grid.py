@@ -15,5 +15,5 @@ images_np = images_np[:100]
 nrow = int(np.sqrt(images_np.shape[0]))
 image_grid = make_grid(torch.tensor(images_np).permute(0, 3, 1, 2) / 255., nrow, padding=2)
 
-with tf.io.gfile.GFile(os.path.join('output_images', f"sample_grid.png"), "wb") as fout:
+with tf.io.gfile.GFile(os.path.join('plots', f"sample_grid.png"), "wb") as fout:
 	save_image(image_grid, fout)
