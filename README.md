@@ -20,22 +20,56 @@ In our [project report](https://github.com/MehdiAbdellaoui/DiffusionGuidance/blo
 conda create --name <env> --file requirements.txt
 ```
 
-### 2) Prepare a pre-trained score network
+### 2) Get the necessary files
 
-### 3) Generate fake samples
+All the necessary files to run the following commands are available in our [public Google Drive](https://drive.google.com/drive/folders/1YwuWQTVLBuTKrx97R_CKimYEyXJm7x9j?usp=sharing)
+### 3) Prepare a pre-trained score network
 
-### 4) Prepare real data
+### 4) Generate fake samples
 
-### 5) Prepare a pre-trained classifier
+```
+python generate.py --network https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-uncond-vp.pkl --num_samples=10000 --batch 100 --outdir training_data --discriminator_checkpoint models/uncond_disc/discrim_uncond_epoch59.pt --conditional 0 --adaptive_weight 0 --w_dg_1 0.
+```
+
+With LoRA: 
+
+```
+python generate.py --network https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-cond-vp.pkl --num_samples=50000 --batch 75 --outdir training_data --discriminator_checkpoint models/lora_cond_disc/discrim_cond_final128.pt --conditional 1 --adaptive_weight 1 --w_dg_1 1. --lora_checkpoint models/lora_uncond_disc/cond_adm_final128.pt --lora_rank 128
+```
+
+### 5) Prepare real data
+
+```
+
+```
+
+### 6) Prepare a pre-trained classifier
 
 - Download [DG/checkpoints/ADM_classifier/32x32_classifier.pt](https://drive.google.com/drive/folders/1gb68C13-QOt8yA6ZnnS6G5pVIlPO7j_y)
 - Place **32x32_classifier.pt** at the directory specified below.
 
-### 6) Train a discriminator
+### 7) Train a discriminator
 
-### 7) Generate discriminator-guided samples
+```
+python train.py --sample_dir training_data/conditional_edm_samples/edm_cond_samples.npz --save_dir models/ --cond 1 --lora_rank 128 --batch_size 64
+```
 
-### 8) Evaluate FID
+```
+python train.py --sample_dir training_data/unconditional_edm_samples/edm_uncond_samples.npz --save_dir models/ --cond 0 --lora_rank 128 --batch_size 64
+```
+### 8) Generate discriminator-guided samples
+
+
+
+
+### 9) Evaluate FID
+
+To generate the FID plot for the unconditional models, use: 
+
+```
+python fid.py --images=./samples --ref=./stats/cifar10-32x32.npz --plot=True --num_samples=10000
+```
+
 
 ## Experimental Results
 
