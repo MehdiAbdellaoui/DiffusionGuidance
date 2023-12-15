@@ -2,6 +2,8 @@ import torch
 from torch import nn
 from discriminator import get_discriminator_model, get_ADM_model
 from guided_diffusion.script_util import create_classifier
+from guided_diffusion.unet import AttentionPool2d
+
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, emb_channels, stride=1):
@@ -20,7 +22,7 @@ class ResidualBlock(nn.Module):
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1),
             nn.BatchNorm2d(out_channels),
-            nn.SiLU(out_channels)
+            nn.SiLU()
         )
         self.conv2 = nn.Sequential(
             nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=stride, padding=1),
@@ -53,36 +55,43 @@ class ResidualBlock(nn.Module):
 
 
 class DiscriminatorResNet(nn.Module):
-    def __init__(self):
+    def __init__(self, input_channels):
         super(DiscriminatorResNet, self).__init__()
-        layer0 = 0
+        upscale = input_channels * 2
+        time_embed_dim = model_channels * 4
+        self.time_embed = nn.Sequential(
+            linear(model_channels, time_embed_dim),
+            nn.SiLU(),
+            linear(time_embed_dim, time_embed_dim),
+        )
+        self.num_classes = num_classes
+        if self.num_classes is not None:
+            self.label_emb = nn.Embedding(num_classes, time_embed_dim)
+        self.resnet = nn.Sequential(
+            ResidualBlock(input_channels, input_channels, 1000),
+            ResidualBlock(input_channels, input_channels, 1000),
+            ResidualBlock(input_channels, input_channels, 1000),
+            ResidualBlock(input_channels, upscale, 1000),
+            ResidualBlock(upscale, upscale, 1000),
+            ResidualBlock(upscale, upscale, 1000),
+        )
+        self.pooling = nn.Sequential(
+                nn.BatchNorm2d(upscale),
+                nn.SiLU(),
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(),
+                nn.Linear(upscale, 1),
+                nn.Sigmoid()
+                )
 
+    def _forward(self, x, timesteps, labels):
+        timesteps = timesteps * 999.
+        emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
-if __name__ == '__main__':
-    # Testing for LoRA
-    original_state_dict = torch.load('guided_diffusion/model/32x32_classifier.pt')
-    adm_classifier = create_classifier(
-        image_size=32,
-        classifier_in_channels=3,
-        classifier_out_channels=1000,
-        classifier_width=128,
-        classifier_depth=4,
-        classifier_attention_resolutions="32,16,8",
-        classifier_pool='attention',
-        conditioned=False,
-        lora_rank=4
-    )
-    # Create a new state dictionary with renamed keys
-    new_state_dict = {}
-    for key in original_state_dict.keys():
-        new_key = key
-        # Example of renaming logic (adjust according to your needs)
-        if 'in_layers.2.weight' in key:
-            new_key = key.replace('in_layers.2.weight', 'in_layers.2.conv.weight')
-        elif 'in_layers.2.bias' in key:
-            new_key = key.replace('in_layers.2.bias', 'in_layers.2.conv.bias')
-        new_state_dict[new_key] = original_state_dict[key]
-
-    missing_keys, unexpected_keys = adm_classifier.load_state_dict(new_state_dict, strict=True)
-
+        if self.num_classes is not None:
+            emb = emb + self.label_emb(torch.argmax(labels, 1))
+        for block in self.resnet:
+            x = block(x, emb)
+        x = self.pooling(x)
+        return x
 
